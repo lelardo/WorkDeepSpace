@@ -1,4 +1,4 @@
-# Guía de componentes — Modular Workspace
+# Guía de componentes — WORK**DEEP**SPACE
 
 Hay dos tipos de componentes que puedes crear:
 
