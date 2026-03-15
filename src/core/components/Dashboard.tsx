@@ -154,8 +154,8 @@ export function Dashboard() {
   return (
     <div className="dashboard-layout">
       {rows.map((rowIds, ri) => (
-        <>
-          <div key={`row-${ri}`} className="dashboard-row" style={{ flex: rowSizes[ri] ?? 1 }}>
+        <div key={`row-container-${ri}`} style={{ flex: rowSizes[ri] ?? 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          <div className="dashboard-row" style={{ flex: 1, display: 'flex', gap: 'inherit' }}>
             {rowIds.map((id, ci) => {
               const mod = Registry.get(id);
               if (!mod) return null;
@@ -182,7 +182,7 @@ export function Dashboard() {
               <div className="divider-handle"/>
             </div>
           )}
-        </>
+        </div>
       ))}
     </div>
   );

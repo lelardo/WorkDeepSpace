@@ -12,10 +12,10 @@ export type Row = Record<string, unknown>;
 
 /** API pública que recibe cada módulo para operar su BD */
 export interface DbApi {
-  /** Ejecuta INSERT / UPDATE / DELETE. Retorna lastInsertRowid */
-  run(sql: string, params?: unknown[]): number;
+  /** Ejecuta INSERT / UPDATE / DELETE. Retorna rowCount */
+  run(sql: string, params?: unknown[]): Promise<number>;
   /** SELECT que devuelve múltiples filas */
-  all<T extends Row>(sql: string, params?: unknown[]): T[];
+  all<T extends Row>(sql: string, params?: unknown[]): Promise<T[]>;
   /** SELECT que devuelve una sola fila o undefined */
-  get<T extends Row>(sql: string, params?: unknown[]): T | undefined;
+  get<T extends Row>(sql: string, params?: unknown[]): Promise<T | undefined>;
 }

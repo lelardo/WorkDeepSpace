@@ -1,7 +1,7 @@
-// src/overlays/notes/index.tsx
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { StickyNote, Plus, Trash2, X, Edit3, ChevronDown } from 'lucide-react';
 import { ms } from '../../core/styles/tokens';
+import { useModuleData } from '../../core/hooks/useModuleData';
 import type { OverlayWidget, OverlayProps } from '../../core/overlay/types';
 import { FAB_SIZE } from '../../core/overlay/types';
 
@@ -33,7 +33,7 @@ function renderMd(text: string): React.ReactNode[] {
   });
 }
 
-interface Note { id:number; titulo:string; contenido:string; color:string; editado_en:string; }
+interface Note extends Record<string, unknown> { id:number; titulo:string; contenido:string; color:string; editado_en:string; }
 
 const COLORS = [
   { label:'Default', bg:'var(--bg-raised)', border:'var(--border)' },
@@ -49,7 +49,6 @@ const PANEL_H = 480;
 
 function NotesOverlayComponent({ db, user, panelX, panelY, didDragRef, onDragStart, onPanelOpen, onPanelClose }: OverlayProps) {
   const [open,         setOpen]         = useState(false);
-  const [notes,        setNotes]        = useState<Note[]>([]);
   const [active,       setActive]       = useState<Note | null>(null);
   const [editMode,     setEditMode]     = useState(false);
   const [draftTitle,   setDraftTitle]   = useState('');
@@ -57,40 +56,57 @@ function NotesOverlayComponent({ db, user, panelX, panelY, didDragRef, onDragSta
   const [draftColor,   setDraftColor]   = useState(COLORS[0].label);
   const [showColors,   setShowColors]   = useState(false);
 
-  const load = useCallback(() => {
-    try { setNotes(db.all<Note>('SELECT * FROM quick_notes WHERE user_id = ? ORDER BY editado_en DESC', [user.id])); }
-    catch { /* tabla no existe aún */ }
-  }, [db, user.id]);
+  const { data: notes, reload } = useModuleData<Note>(
+    db,
+    'SELECT * FROM quick_notes WHERE user_id = $1 ORDER BY editado_en DESC',
+    [user.id]
+  );
 
-  useEffect(() => { load(); }, [load]);
-  useEffect(() => { if (open && notes.length > 0 && !active) setActive(notes[0]); }, [open, notes, active]);
+  useEffect(() => { 
+    if (open && notes && notes.length > 0 && !active) setActive(notes[0]);
+  }, [open, notes, active]);
 
   const toggleOpen = () => {
-    if (didDragRef.current) return; // fue drag, no click
+    if (didDragRef.current) return;
     const next = !open;
     setOpen(next);
     next ? onPanelOpen() : onPanelClose();
   };
 
-  const newNote = () => {
-    const id = db.run('INSERT INTO quick_notes (user_id, titulo, contenido, color) VALUES (?, ?, ?, ?)', [user.id, 'Nueva nota', '', COLORS[0].label]);
-    load();
-    const n = db.get<Note>('SELECT * FROM quick_notes WHERE id = ?', [id]);
-    if (n) { setActive(n); setDraftTitle(n.titulo); setDraftContent(n.contenido); setDraftColor(n.color); setEditMode(true); }
+  const newNote = async () => {
+    if (!db) return;
+    await db.run(
+      'INSERT INTO quick_notes (user_id, titulo, contenido, color) VALUES ($1, $2, $3, $4)',
+      [user.id, 'Nueva nota', '', COLORS[0].label]
+    );
+    reload();
   };
 
-  const deleteNote = (id: number) => { db.run('DELETE FROM quick_notes WHERE id = ?', [id]); load(); if (active?.id === id) setActive(null); };
-
-  const saveNote = () => {
-    if (!active) return;
-    db.run("UPDATE quick_notes SET titulo=?, contenido=?, color=?, editado_en=datetime('now') WHERE id=?", [draftTitle, draftContent, draftColor, active.id]);
-    load();
-    const u = db.get<Note>('SELECT * FROM quick_notes WHERE id = ?', [active.id]);
-    if (u) setActive(u);
-    setEditMode(false); setShowColors(false);
+  const deleteNote = async (id: number) => {
+    if (!db) return;
+    await db.run('DELETE FROM quick_notes WHERE id = $1', [id]);
+    await reload();
+    if (active?.id === id) setActive(null);
   };
 
-  const startEdit = (n: Note) => { setDraftTitle(n.titulo); setDraftContent(n.contenido); setDraftColor(n.color); setEditMode(true); setShowColors(false); };
+  const saveNote = async () => {
+    if (!active || !db) return;
+    await db.run(
+      "UPDATE quick_notes SET titulo=$1, contenido=$2, color=$3, editado_en=CURRENT_TIMESTAMP WHERE id=$4",
+      [draftTitle, draftContent, draftColor, active.id]
+    );
+    await reload();
+    setEditMode(false);
+    setShowColors(false);
+  };
+
+  const startEdit = (n: Note) => {
+    setDraftTitle(n.titulo);
+    setDraftContent(n.contenido);
+    setDraftColor(n.color);
+    setEditMode(true);
+    setShowColors(false);
+  };
 
   const curColor = COLORS.find(c => c.label === (editMode ? draftColor : active?.color)) ?? COLORS[0];
 
@@ -117,7 +133,7 @@ function NotesOverlayComponent({ db, user, panelX, panelY, didDragRef, onDragSta
                 <button style={{ ...ms.btn.ghost, padding:'2px' }} onClick={newNote}><Plus size={13}/></button>
               </div>
               <div style={{ flex:1, overflowY:'auto' }}>
-                {notes.length === 0
+                {!notes || notes.length === 0
                   ? <div style={{ padding:'0.75rem 0.5rem', ...ms.muted, fontSize:'0.72rem', textAlign:'center', fontStyle:'italic' }}>Sin notas</div>
                   : notes.map(n => {
                     const c = COLORS.find(c => c.label === n.color) ?? COLORS[0];
@@ -186,7 +202,7 @@ function NotesOverlayComponent({ db, user, panelX, panelY, didDragRef, onDragSta
             </div>
           </div>
           <div style={{ padding:'0.25rem 0.75rem', borderTop:'1px solid var(--border)', backgroundColor:'var(--bg-raised)', flexShrink:0 }}>
-            <span style={{ ...ms.label, fontSize:'0.58rem' }}>{notes.length} nota{notes.length!==1?'s':''}</span>
+            <span style={{ ...ms.label, fontSize:'0.58rem' }}>{notes ? notes.length : 0} nota{notes && notes.length !== 1 ? 's' : ''}</span>
           </div>
         </div>
       )}
@@ -218,11 +234,14 @@ export const NotesOverlay: OverlayWidget = {
   migrations: [{
     version: 1,
     sql: `CREATE TABLE IF NOT EXISTS quick_notes (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL,
-      titulo TEXT NOT NULL DEFAULT 'Nueva nota', contenido TEXT NOT NULL DEFAULT '',
-      color TEXT NOT NULL DEFAULT 'Default',
-      creado_en TEXT NOT NULL DEFAULT (datetime('now')),
-      editado_en TEXT NOT NULL DEFAULT (datetime('now'))
-    ); CREATE INDEX IF NOT EXISTS idx_notes_user ON quick_notes(user_id);`,
+      id        SERIAL PRIMARY KEY,
+      user_id   INTEGER NOT NULL,
+      titulo    TEXT    NOT NULL DEFAULT 'Nueva nota',
+      contenido TEXT    NOT NULL DEFAULT '',
+      color     TEXT    NOT NULL DEFAULT 'Default',
+      creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      editado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_notes_user ON quick_notes(user_id);`,
   }],
 };

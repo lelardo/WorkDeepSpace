@@ -21,7 +21,9 @@ The application functions as a high-performance "base-plate." Users don't just u
 - **Frontend**: React 18 + TypeScript + Vite.
 - **Styling**: Zero-library approach. All UI uses a custom Token System (`ms`) and CSS variables for instant theme switching.
 - **State Management**: Custom singleton stores using `useSyncExternalStore` for reactive UI updates.
-- **Persistence Layer**: Built with a "Bring Your Own Database" philosophy. While running in-browser for development, the architecture is prepared for private, user-provided SQL instances.
+- **Database**: PostgreSQL everywhere. Runtime selection between PGlite (WASM) for local development and real PostgreSQL for production.
+- **Backend** (production): Express.js server with PostgreSQL driver for remote data persistence.
+- **Persistence Layer**: Built with a "Bring Your Own Database" philosophy. Users provide their own PostgreSQL instance (Neon, AWS RDS, DigitalOcean, Supabase, etc.), and the system handles all data persistence securely.
 
 ## Core Modules & Widgets
 
@@ -35,19 +37,109 @@ The application functions as a high-performance "base-plate." Users don't just u
 
 ## Data Sovereignty
 
-Unlike traditional SaaS, **WorkDeepSpace** does not rely on a centralized backend.
-1. **Private by Design**: Data is processed locally.
-2. **Flexible SQL**: The database instance is injected as a prop to every module. 
-3. **Portability**: Users are intended to provide their own SQL storage, keeping their work history private and under their direct control.
+**WorkDeepSpace** is the only productivity suite that empowers you to own your data completely.
+
+### Local Development (PGlite)
+
+1. **Zero setup**: `npm run dev:local` starts immediately
+2. **WASM PostgreSQL** runs in-process (no external dependency)
+3. **IndexedDB storage** persists between sessions automatically
+4. **Perfect for**: Building, prototyping, and offline work
+
+### Production (Your PostgreSQL)
+
+Unlike SaaS products that host your data:
+
+- **You own the database instance** — deploy on any PostgreSQL provider
+- **Your private server** — the Express backend runs on your infrastructure
+- **Full encryption/security** — control TLS, backups, and access logs
+- **Zero vendor lock-in** — switch providers anytime without data loss
+
+#### PostgreSQL Options
+
+- **[Neon](https://neon.tech)** — Serverless PostgreSQL
+- **[AWS RDS](https://aws.amazon.com/rds/postgresql/)** — Managed PostgreSQL on AWS
+- **[DigitalOcean](https://www.digitalocean.com/products/managed-databases)** — Simple managed databases
+- **[Supabase](https://supabase.com)** — PostgreSQL with additional APIs
+- **[Railway](https://railway.app)** — Fast deployment platform
+- **Self-hosted** — VPS or on-premises server
+
+### How It Works
+
+**Development:**
+```
+┌─────────────┐
+│  Vite App   │
+│   (React)   │
+└──────┬──────┘
+       │
+       └──→ PGlite (WASM)
+             │
+             └──→ IndexedDB
+                  (persists)
+```
+
+**Production:**
+```
+┌─────────────┐
+│  Vite App   │  (built frontend)
+│   (React)   │
+└──────┬──────┘
+       │ fetch()
+       ↓
+┌─────────────────────┐
+│  Express Backend    │
+│  (Node.js server)   │
+└──────┬──────────────┘
+       │ pg driver
+       ↓
+┌─────────────────────┐
+│  PostgreSQL         │
+│  (your choice)      │
+│  Neon / RDS / etc   │
+└─────────────────────┘
+```
+
+### Setup
+
+Detailed setup instructions are in [QUICKSTART.md](QUICKSTART.md).
+
+```bash
+# Local development (fastest)
+npm run dev:local
+
+# Remote development (real PostgreSQL)
+npm run dev:remote        # Requires .env.local
+
+# Production build
+npm run build
+```
 
 ## Getting Started
 
 ```bash
-# Clone the mission control
-git clone [https://github.com/your-repo/workdeepspace.git](https://github.com/your-repo/workdeepspace.git)
+# Clone the repository
+git clone https://github.com/your-repo/workdeepspace.git
+cd workdeepspace
 
 # Install dependencies
 npm install
 
-# Launch the deck
-npm run dev
+# Option 1: Local development (PGlite — fastest)
+npm run dev:local
+# Opens http://localhost:5173 with in-memory PostgreSQL
+
+# Option 2: Remote development (Real PostgreSQL)
+# 1. Set up a PostgreSQL database (e.g., Neon free tier)
+# 2. Copy .env.example to .env.local
+# 3. Fill in your database credentials
+# 4. Run:
+npm run dev:remote
+# Opens http://localhost:5173 + Express backend on :3001
+```
+
+**Login credentials (dev):**
+- Username: `dev`
+- Password: `dev`
+
+See [QUICKSTART.md](QUICKSTART.md) for detailed setup instructions, module development guide, and database schema patterns.

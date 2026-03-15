@@ -1,117 +1,168 @@
 // src/core/db/db.ts
+// Modo híbrido: PGlite local (desarrollo) o Backend API remoto (producción)
+
+import { PGlite } from '@electric-sql/pglite';
 import type { DbApi, Row } from './types';
 
-const LS_KEY = 'workspace_db_snapshot';
+let _db: any = null;
+let _initPromise: Promise<any> | null = null;
 
-// ── localStorage helpers ───────────────────────────────
-function lsSave(db: any): void {
-  try {
-    const tableNames: string[] = [];
-    db.exec({
-      sql: `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != '_migrations'`,
-      rowMode: 'object',
-      callback: (r: any) => tableNames.push(r.name),
-    });
-    const tables: Record<string, Row[]> = {};
-    for (const name of tableNames) {
-      const rows: Row[] = [];
-      db.exec({ sql: `SELECT * FROM "${name}"`, rowMode: 'object', callback: (r: any) => rows.push(r) });
-      tables[name] = rows;
-    }
-    localStorage.setItem(LS_KEY, JSON.stringify({ tables, savedAt: Date.now() }));
-  } catch (e) { console.warn('[db] save error', e); }
+// ── Detectar modo ──────────────────────────────────────
+function getDbMode(): 'local' | 'remote' {
+  const mode = import.meta.env.VITE_DB_MODE || 'local';
+  return mode as 'local' | 'remote';
 }
 
-function lsRestore(db: any): void {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (!raw) return;
-    const { tables } = JSON.parse(raw) as { tables: Record<string, Row[]> };
-    for (const [table, rows] of Object.entries(tables)) {
-      if (!rows.length) continue;
-      // Verifica que la tabla existe
-      let exists = false;
-      db.exec({ sql: `SELECT 1 FROM sqlite_master WHERE type='table' AND name=?`, bind: [table], rowMode: 'object', callback: () => { exists = true; } });
-      if (!exists) { console.warn(`[db] tabla ${table} no existe todavía`); continue; }
-      for (const row of rows) {
-        const cols = Object.keys(row);
-        const vals = Object.values(row);
-        db.exec({ sql: `INSERT OR IGNORE INTO "${table}" (${cols.map(c=>`"${c}"`).join(',')}) VALUES (${cols.map(()=>'?').join(',')})`, bind: vals });
-      }
-    }
-    console.info('[db] datos restaurados desde localStorage');
-  } catch (e) { console.warn('[db] restore error', e); }
+function getApiUrl(): string {
+  // En dev, Vite proxy redirige /api/* a http://localhost:3001/api/*
+  // En prod, el frontend y backend están en el mismo host
+  return '/api';
 }
 
-// ── Singleton ──────────────────────────────────────────
-let _raw:         any     = null;   // instancia sqlite3 oo1.DB
-let _initPromise: any     = null;
-let _pauseSave            = false;  // ← pausa el snapshot durante migraciones
+// ── PGlite Local (Desarrollo) ──────────────────────────
+async function initPGliteLocal(): Promise<PGlite> {
+  const db = new PGlite('idb://modular-workspace');
 
-async function initDb(): Promise<any> {
-  const mod = (await import('@sqlite.org/sqlite-wasm')).default;
-  const sqlite3 = await mod({ print: () => {}, printErr: console.error });
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS _migrations (
+      module_id TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      ran_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (module_id, version)
+    );
+  `);
 
-  if (sqlite3.opfs) {
-    const db = new sqlite3.oo1.OpfsDb('/workspace.sqlite3');
-    db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;');
-    console.info('[db] OPFS activo');
-    return db;
-  }
-
-  const db = new sqlite3.oo1.DB(':memory:', 'ct');
-  db.exec('PRAGMA foreign_keys=ON;');
-  console.info('[db] localStorage snapshot mode');
+  console.info('[db] ✓ PGlite ready (PostgreSQL WASM, local mode)');
   return db;
 }
 
+// ── Backend API Remote (Producción) ──────────────────
+function initBackendRemote() {
+  // Devuelve un objeto que actúa como el backend
+  return { type: 'backend' };
+}
+
+// ── Inicializar BD ─────────────────────────────────────
+async function initDb(): Promise<any> {
+  const config = getDbMode();
+  
+  if (config === 'local') {
+    return initPGliteLocal();
+  } else {
+    return initBackendRemote();
+  }
+}
+
 async function getRaw(): Promise<any> {
-  if (_raw) return _raw;
+  if (_db) return _db;
   if (!_initPromise) _initPromise = initDb();
-  _raw = await _initPromise;
-  _raw.exec(`CREATE TABLE IF NOT EXISTS _migrations (
-    module_id TEXT NOT NULL, version INTEGER NOT NULL,
-    ran_at TEXT NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY (module_id, version)
-  );`);
-  return _raw;
+  _db = await _initPromise;
+  return _db;
 }
 
 // ── API pública ────────────────────────────────────────
 export async function getDb(): Promise<DbApi> {
   const db = await getRaw();
-  return wrap(db);
+  const mode = getDbMode();
+  return wrap(db, mode);
 }
 
-/** Llama esto ANTES de correr migraciones para no contaminar el snapshot */
-export function pauseSnapshot()  { _pauseSave = true;  }
-/** Llama esto DESPUÉS de migraciones + restore para reactivar el guardado */
-export function resumeSnapshot() { _pauseSave = false; }
-
-/** Restaura datos desde localStorage (llamar tras migraciones) */
-export async function restoreSnapshot() {
-  const db = await getRaw();
-  lsRestore(db);
+function wrap(db: any, mode: 'local' | 'remote'): DbApi {
+  if (mode === 'local') {
+    return wrapPGlite(db);
+  } else {
+    return wrapBackend();
+  }
 }
 
-function wrap(db: any): DbApi {
+// ── Wrapper PGlite ─────────────────────────────────────
+function wrapPGlite(pgDb: PGlite): DbApi {
   return {
-    run(sql: string, params: unknown[] = []): number {
-      db.exec({ sql, bind: params });
-      let id = 0;
-      db.exec({ sql: 'SELECT last_insert_rowid() as id', rowMode: 'object', callback: (r: any) => { id = r.id; } });
-      if (!_pauseSave) lsSave(db);
-      return id;
+    async run(sql: string, params: unknown[] = []): Promise<number> {
+      try {
+        await pgDb.query(sql, params);
+        console.debug('[db:pglite:run]', sql.slice(0, 50), params);
+        return 0;
+      } catch (e) {
+        console.error('[db:pglite:run] error:', e, sql, params);
+        throw e;
+      }
     },
-    all<T extends Row>(sql: string, params: unknown[] = []): T[] {
-      const rows: T[] = [];
-      db.exec({ sql, bind: params, rowMode: 'object', callback: (r: any) => rows.push(r as T) });
-      return rows;
+
+    async all<T extends Row>(sql: string, params: unknown[] = []): Promise<T[]> {
+      try {
+        const result = await pgDb.query<T>(sql, params);
+        return result?.rows ?? [];
+      } catch (e) {
+        console.error('[db:pglite:all] error:', e, sql, params);
+        return [];
+      }
     },
-    get<T extends Row>(sql: string, params: unknown[] = []): T | undefined {
-      let result: T | undefined;
-      db.exec({ sql, bind: params, rowMode: 'object', callback: (r: any) => { if (!result) result = r as T; } });
-      return result;
+
+    async get<T extends Row>(sql: string, params: unknown[] = []): Promise<T | undefined> {
+      try {
+        const result = await pgDb.query<T>(sql, params);
+        return result?.rows?.[0];
+      } catch (e) {
+        console.error('[db:pglite:get] error:', e, sql, params);
+        return undefined;
+      }
+    },
+  };
+}
+
+// ── Wrapper Backend API ────────────────────────────────
+function wrapBackend(): DbApi {
+  const apiUrl = getApiUrl();
+
+  return {
+    async run(sql: string, params: unknown[] = []): Promise<number> {
+      try {
+        const res = await fetch(`${apiUrl}/db/run`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sql, params }),
+        });
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        console.debug('[db:backend:run]', sql.slice(0, 50), params);
+        return data.rowCount || 0;
+      } catch (e) {
+        console.error('[db:backend:run] error:', e, sql, params);
+        throw e;
+      }
+    },
+
+    async all<T extends Row>(sql: string, params: unknown[] = []): Promise<T[]> {
+      try {
+        const res = await fetch(`${apiUrl}/db/all`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sql, params }),
+        });
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        return Array.isArray(data) ? data : [];
+      } catch (e) {
+        console.error('[db:backend:all] error:', e, sql, params);
+        return [];
+      }
+    },
+
+    async get<T extends Row>(sql: string, params: unknown[] = []): Promise<T | undefined> {
+      try {
+        const res = await fetch(`${apiUrl}/db/get`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sql, params }),
+        });
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        return data || undefined;
+      } catch (e) {
+        console.error('[db:backend:get] error:', e, sql, params);
+        return undefined;
+      }
     },
   };
 }

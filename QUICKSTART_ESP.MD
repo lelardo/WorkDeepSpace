@@ -9,6 +9,49 @@ Hay dos tipos de componentes que puedes crear:
 
 ---
 
+## Sistema de Base de Datos
+
+**WorkDeepSpace** soporta dos modos de persistencia:
+
+| Modo | Uso | Almacenamiento | Conexión |
+|------|-----|-----------------|----------|
+| **Local (Desarrollo)** | `npm run dev:local` | PGlite (WASM) → IndexedDB | En-proceso |
+| **Remote (Producción)** | `npm run dev:remote` | PostgreSQL (Neon, AWS RDS, etc.) | API Backend |
+
+### Configuración — `.env.local`
+
+```env
+# ← Modo de operación
+VITE_DB_MODE=local        # o 'remote'
+
+# Si VITE_DB_MODE=remote, configura la conexión:
+VITE_DB_HOST=tu-postgres-host
+VITE_DB_PORT=5432
+VITE_DB_NAME=nombre_tu_base_datos
+VITE_DB_USER=tu_usuario
+VITE_DB_PASSWORD=tu_password
+VITE_DB_SSL=true           # o false si conectas localmente
+
+# Puerto del servidor API (solo remote)
+API_PORT=3001
+```
+
+### Autodetección de modo
+
+El framework detecta automáticamente el modo desde `VITE_DB_MODE`:
+- **local**: PGlite en el navegador, datos persistidos en IndexedDB
+- **remote**: Requests HTTP a `http://localhost:3001/api/db/*` (dev) o al mismo host (prod)
+
+### Scripts de desarrollo
+
+```bash
+npm run dev:local       # Solo Vite + PGlite (desarrollo rápido)
+npm run dev:remote      # Servidor Node.js + Vite (dev con PostgreSQL real)
+npm run build           # Producción (compilado, requiere backend Node en prod)
+```
+
+---
+
 ## TIPO 1 — Módulo de dashboard
 
 ### Estructura
@@ -27,7 +70,7 @@ export const MiModulo: AppModule = {
   id:          'mi-modulo',     // único en toda la app — sin espacios
   name:        'Mi Módulo',
   description: 'Qué hace',
-  icon:        '🧩',            // emoji o ReactNode
+  icon:        <MiIcono size={20} />, // icono de lucide-react
 
   component: MiModuloComponent,
 
@@ -43,9 +86,9 @@ export const MiModulo: AppModule = {
       version: 1,        // NUNCA edites versiones existentes, solo agrega nuevas
       sql: `
         CREATE TABLE IF NOT EXISTS mi_tabla (
-          id        INTEGER PRIMARY KEY AUTOINCREMENT,
+          id        SERIAL PRIMARY KEY,
           valor     TEXT    NOT NULL,
-          creado_en TEXT    NOT NULL DEFAULT (datetime('now'))
+          creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
       `,
     },
@@ -53,18 +96,39 @@ export const MiModulo: AppModule = {
 };
 ```
 
-**3.** Escribe el componente:
-```tsx
-const MiModuloComponent = ({ db, dark }: ModuleProps) => {
-  const [items, setItems] = useState<MiTipo[]>([]);
+**⚠️ Importante — PostgreSQL syntax:**
+- `SERIAL PRIMARY KEY` (no `AUTOINCREMENT`)
+- `TIMESTAMP DEFAULT CURRENT_TIMESTAMP` (no `datetime('now')`)
+- Parámetros: `$1, $2, $3...` (no `?`)
 
-  useEffect(() => {
-    setItems(db.all<MiTipo>('SELECT * FROM mi_tabla ORDER BY id DESC'));
-  }, [db]);
+**3.** Escribe el componente usando `useModuleData`:
+```tsx
+import { useModuleData } from '../../core/hooks/useModuleData';
+
+const MiModuloComponent = ({ db, dark }: ModuleProps) => {
+  const { data: items, loading, error, reload } = useModuleData<MiTipo>(
+    db,
+    'SELECT * FROM mi_tabla ORDER BY id DESC'
+  );
+
+  const addItem = async () => {
+    if (!db) return;
+    await db.run(
+      'INSERT INTO mi_tabla (valor) VALUES ($1)',
+      ['nuevo valor']
+    );
+    await reload();  // ← importante: espera a que reload complete
+  };
 
   return (
     <div style={ms.container}>
-      {/* usa ms.* para estilos consistentes con el tema */}
+      {loading ? (
+        <div style={ms.empty}>Cargando…</div>
+      ) : items.length === 0 ? (
+        <div style={ms.empty}>Sin datos</div>
+      ) : (
+        items.map(item => /* renderizar */)
+      )}
     </div>
   );
 };
@@ -91,7 +155,7 @@ El `OverlayLayer` gestiona toda la lógica de posición, drag, snap y apilado. E
 
 ### Estructura
 ```
-src/overlays/mi-overlay/
+src/overlay_modules/mi-overlay/
 └── index.tsx
 ```
 
@@ -101,62 +165,75 @@ export const MiOverlay: OverlayWidget = {
   id:            'mi-overlay',
   component:     MiOverlayComponent,
   defaultCorner: 'bottom-right',  // 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left'
-  panelWidth:    340,             // ← IMPORTANTE: el OverlayLayer lo usa para posicionar el panel
-  panelHeight:   480,             // ← IMPORTANTE: ídem
+  panelWidth:    340,
+  panelHeight:   480,
   migrations:    [],
 };
 ```
 
-### Componente
+### Componente con persistencia
 ```tsx
+import { useModuleData } from '../../core/hooks/useModuleData';
+
 function MiOverlayComponent({
   db, user,
-  panelX, panelY,       // coordenadas del panel relativas al shell — NO calcules esto tú
-  didDragRef,           // ref compartido: true si el mouseup fue drag, no click
-  onDragStart,          // pasar al onMouseDown del FAB
-  onPanelOpen,          // llamar cuando el panel se abre
-  onPanelClose,         // llamar cuando el panel se cierra
+  panelX, panelY,
+  didDragRef,
+  onDragStart,
+  onPanelOpen,
+  onPanelClose,
 }: OverlayProps) {
   const [open, setOpen] = useState(false);
+  const { data: items, reload } = useModuleData<MiTipo>(
+    db,
+    'SELECT * FROM mi_tabla WHERE user_id = $1 ORDER BY id DESC',
+    [user.id]
+  );
 
   const toggleOpen = () => {
-    if (didDragRef.current) return;  // ignora si fue drag
+    if (didDragRef.current) return;
     const next = !open;
     setOpen(next);
     next ? onPanelOpen() : onPanelClose();
   };
 
+  const addItem = async () => {
+    if (!db) return;
+    await db.run(
+      'INSERT INTO mi_tabla (user_id, valor) VALUES ($1, $2)',
+      [user.id, 'nuevo']
+    );
+    await reload();  // ← espera siempre
+  };
+
   return (
     <>
-      {/* Panel — position:absolute, coords dadas por OverlayLayer */}
       {open && (
         <div
-          onMouseDown={e => e.stopPropagation()}  // evita que el panel active el drag
+          onMouseDown={e => e.stopPropagation()}
           style={{
             position: 'absolute',
             left: `${panelX}px`,
             top:  `${panelY}px`,
             zIndex: 300,
-            width: `${PANEL_W}px`,
-            height: `${PANEL_H}px`,
-            // ... resto de estilos
+            width: '340px',
+            height: '480px',
+            // ... estilos
           }}
         >
-          {/* contenido */}
+          {/* contenido — usa items */}
         </div>
       )}
 
-      {/* FAB — onMouseDown activa el drag en OverlayLayer */}
       <button
-        onMouseDown={onDragStart}   // ← activa drag
-        onClick={toggleOpen}        // ← abre/cierra panel (solo si no fue drag)
+        onMouseDown={onDragStart}
+        onClick={toggleOpen}
         style={{
           position: 'absolute', left: 0, top: 0,
-          width: `${FAB_SIZE}px`, height: `${FAB_SIZE}px`,
+          width: '44px', height: '44px',
           borderRadius: '22px',
           cursor: 'grab',
           pointerEvents: 'auto',
-          // ...
         }}
       >
         {open ? <X size={22}/> : <MiIcono size={22}/>}
@@ -166,25 +243,9 @@ function MiOverlayComponent({
 }
 ```
 
-### Cómo funciona el posicionamiento
-
-El `OverlayLayer` calcula automáticamente:
-
-- **Posición del FAB** — esquina asignada (`defaultCorner`) con apilado automático si hay varios en la misma esquina
-- **Posición del panel** — al lado del FAB, alineado verticalmente:
-  - FAB a la izquierda → panel a su derecha
-  - FAB a la derecha → panel a su izquierda
-  - FAB arriba → panel alineado al tope del FAB
-  - FAB abajo → panel alineado al fondo del FAB
-- **Drag & snap** — al soltar, el FAB se ancla a la esquina más cercana con animación spring
-- **Apilado** — si hay varios overlays en la misma esquina se colocan uno encima del otro sin solaparse
-- **Z-index** — el overlay con el panel abierto sube automáticamente al tope
-
-**El componente no necesita calcular nada de esto** — solo usa `panelX`/`panelY` tal como llegan.
-
 ### Registra en `src/core/overlay/overlayRegistry.ts`:
 ```ts
-import { MiOverlay } from '../../overlays/mi-overlay';
+import { MiOverlay } from '../../overlay_modules/mi-overlay';
 
 const OVERLAYS: OverlayWidget[] = [
   ChatOverlay,
@@ -195,77 +256,120 @@ const OVERLAYS: OverlayWidget[] = [
 
 ---
 
-## Props disponibles
-
-### ModuleProps (módulos de dashboard)
-```ts
-interface ModuleProps {
-  db:      DbApi;    // base de datos lista para usar
-  dark?:   boolean;
-  config?: Record<string, unknown>;
-}
-// Nota: para el usuario usa useSession() dentro del componente
-```
-
-### OverlayProps (overlays flotantes)
-```ts
-interface OverlayProps {
-  db:             DbApi;
-  user:           User;           // siempre disponible en overlays
-  dark?:          boolean;
-  panelX:         number;         // posición del panel (relativa al shell)
-  panelY:         number;         // calculada por OverlayLayer — úsala directamente
-  didDragRef:     RefObject<boolean>; // lee .current en onClick para distinguir drag de click
-  onDragStart:    (e: React.MouseEvent) => void;
-  onPanelOpen:    () => void;
-  onPanelClose:   () => void;
-}
-```
-
----
-
 ## API de base de datos (`db`)
 
+Todas las operaciones son **async** — siempre usa `await`:
+
 ```ts
-// Escritura — retorna lastInsertRowid
-db.run('INSERT INTO mi_tabla (valor) VALUES (?)', ['hola'])
+// Escritura — INSERT, UPDATE, DELETE, CREATE TABLE
+await db.run('INSERT INTO mi_tabla (valor) VALUES ($1)', ['hello'])
 
-// Lectura múltiple
-db.all<MiTipo>('SELECT * FROM mi_tabla ORDER BY id DESC')
+// Lectura múltiple — retorna array
+const items = await db.all<MiTipo>('SELECT * FROM mi_tabla ORDER BY id DESC')
 
-// Lectura una fila
-db.get<MiTipo>('SELECT * FROM mi_tabla WHERE id = ?', [1])
+// Lectura una fila — retorna objeto o undefined
+const item = await db.get<MiTipo>('SELECT * FROM mi_tabla WHERE id = $1', [1])
 ```
 
-**Importante con SQLite WASM:** usa siempre comillas simples en el SQL para literales de string:
+**Parámetros:** Usa siempre `$1, $2, $3...` (PostgreSQL style):
 ```ts
 // ✅ correcto
-db.run("UPDATE tabla SET editado_en=datetime('now') WHERE id=?", [id])
+await db.run("UPDATE tabla SET valor=$1, editado_en=CURRENT_TIMESTAMP WHERE id=$2", ['nuevo', 5])
 
-// ❌ incorrecto — comillas dobles dentro de template string
-db.run(`UPDATE tabla SET editado_en=datetime("now") WHERE id=?`, [id])
+// ❌ incorrecto (SQLite style)
+await db.run("UPDATE tabla SET valor=?, editado_en=datetime('now') WHERE id=?", ['nuevo', 5])
 ```
-
-Los datos se guardan automáticamente en `localStorage` después de cada `db.run()` y se restauran al recargar.
 
 ---
 
-## Usuario en sesión (`useSession`)
+## Hook reactivo — `useModuleData`
 
-Disponible desde cualquier componente de módulo:
+Ejecuta una query y reactualiza automáticamente:
+
 ```ts
-import { useSession } from '../../core/auth/authStore';
+import { useModuleData } from '../../core/hooks/useModuleData';
 
-const session = useSession(); // Session | null
+const { data, loading, error, reload } = useModuleData<MiTipo>(
+  db,
+  'SELECT * FROM mi_tabla WHERE estado = $1',
+  ['activo'],  // parámetros
+  []           // dependencias opcionales
+);
 
-if (session) {
-  session.user.id            // number
-  session.user.username      // string
-  session.user.display_name  // string
-}
+// Dentro de un handler (crear, editar, eliminar):
+const handleAdd = async () => {
+  await db.run('INSERT INTO mi_tabla VALUES ...', [...]);
+  await reload();  // ← actualiza data automáticamente
+};
 ```
 
-En overlays el usuario llega directamente como prop `user: User` (siempre disponible porque los overlays solo se montan con sesión activa).
+**Propiedades:**
+- `data: MiTipo[]` — resultados de la query
+- `loading: boolean` — true mientras se ejecuta
+- `error: Error | null` — error si hay
+- `reload: () => Promise<void>` — ejecuta la query nuevamente
+
+---
+
+## Persistencia — Cómo funciona
+
+### Modo Local (PGlite)
+
+1. **Almacenamiento**: IndexedDB del navegador
+2. **Ciclo de vida**:
+   - App inicia → PGlite crea BD en memoria
+   - Tablas se crean vía migraciones
+   - Cada operación se sincroniza a IndexedDB automáticamente
+   - Al recargar → se restaura desde IndexedDB
+3. **Datos persistentes entre sesiones**: Sí (salvo que limpies IndexedDB)
+
+```bash
+npm run dev:local
+# Datos viven en: IndexedDB → idb://modular-workspace
+```
+
+### Modo Remote (PostgreSQL + API)
+
+1. **Almacenamiento**: Base de datos PostgreSQL real (Neon, AWS RDS, etc.)
+2. **Arquitectura**:
+   - **Cliente** (navegador) → Vite en puerto 5173
+   - **Backend** (Node.js) → Express en puerto 3001
+   - El cliente hace fetch calls a `/api/db/{run,all,get}`
+   - El backend conecta a PostgreSQL con las credenciales de `.env.local`
+3. **Migraciones**: Se ejecutan una sola vez en el servidor y se registran en `_migrations`
+4. **Persistencia**: Datos en PostgreSQL = datos permanentes en la base de datos real
+
+```bash
+npm run dev:remote
+# Dev: frontend → Vite proxy (5173) → backend (3001) → PostgreSQL (5432)
+# Prod: frontend → backend (mismo host) → PostgreSQL
+```
+
+---
+
+## Usuarios y sesiones
+
+Todas las tablas filtrar por `user_id` para multi-tenancy:
+
+```ts
+// En módulos — obtén el user con useSession()
+import { useSession } from '../../core/auth/authStore';
+
+const session = useSession();
+const userId = session?.user.id;
+
+// Query filtrando por usuario
+const { data } = useModuleData<MiTipo>(
+  db,
+  'SELECT * FROM mi_tabla WHERE user_id = $1',
+  [userId]
+);
+
+// En overlays — user llega como prop
+const MiOverlay = ({ user, db }: OverlayProps) => {
+  const { data } = useModuleData(db, '... WHERE user_id = $1', [user.id]);
+};
+```
 
 ---
 
@@ -300,9 +404,25 @@ Todos usan variables CSS (`var(--text)`, `var(--bg-card)`, etc.) — responden a
 
 ---
 
-## Resumen — archivos a tocar
+## Resumen — Flujo de trabajo
 
-| Qué crear | Archivo nuevo | Archivo a editar |
-|-----------|--------------|-----------------|
-| Módulo dashboard | `src/modules/mi-modulo/index.tsx` | `src/core/registry/index.ts` |
-| Overlay flotante | `src/overlays/mi-overlay/index.tsx` | `src/core/overlay/overlayRegistry.ts` |
+| Paso | Qué hacer |
+|------|-----------|
+| 1. Crear módulo | Copiar `_template` → `src/modules/mi-modulo/` |
+| 2. Definir tabla | Agregar migration con `CREATE TABLE` (PostgreSQL syntax) |
+| 3. Escribir componente | Usar `useModuleData` para queries reactivas |
+| 4. Importar datos | `const { data, reload } = useModuleData(...)` |
+| 5. Modificar datos | `await db.run(...)` seguido de `await reload()` |
+| 6. Registrar | Agregar en `src/core/registry/index.ts` |
+| 7. Probar | `npm run dev:local` (rápido) o `npm run dev:remote` (PostgreSQL) |
+
+---
+
+## Archivos clave
+
+- **`.env.local`** — Variables de entorno (NO commitear)
+- **`server.js`** — Backend Express (solo en modo remote)
+- **`src/core/db/db.ts`** — Abstracción de BD (local/remote automático)
+- **`src/core/db/migrations.ts`** — Sistema de migraciones
+- **`src/core/hooks/useModuleData.ts`** — Hook reactivo para queries
+

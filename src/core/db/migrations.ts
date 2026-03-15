@@ -1,12 +1,41 @@
 // src/core/db/migrations.ts
 import type { Migration } from './types';
-import { getDb, pauseSnapshot, resumeSnapshot, restoreSnapshot } from './db';
+import { getDb } from './db';
+
+function getDbMode(): 'local' | 'remote' {
+  const mode = import.meta.env.VITE_DB_MODE || 'local';
+  return mode as 'local' | 'remote';
+}
 
 export async function runMigrations(moduleId: string, migrations: Migration[]) {
   const db = await getDb();
-  const ran = db.all<{ version: number }>(
-    'SELECT version FROM _migrations WHERE module_id = ? ORDER BY version', [moduleId]
-  ).map(r => r.version);
+  
+  // In remote mode, use the API endpoint instead of executing locally
+  if (getDbMode() === 'remote') {
+    try {
+      const res = await fetch('/api/migrations/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ moduleId, migrations }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        console.info(`[db] ${moduleId}: ran ${data.ran}/${data.total} migrations`);
+      } else {
+        console.error(`[db] migration failed for ${moduleId}:`, data.error);
+      }
+      return;
+    } catch (e) {
+      console.error(`[db] migration API error for ${moduleId}:`, e);
+      return;
+    }
+  }
+
+  // Local mode: execute migrations directly
+  const ran = (await db.all<{ version: number }>(
+    'SELECT version FROM _migrations WHERE module_id = $1 ORDER BY version', 
+    [moduleId]
+  )).map(r => r.version);
 
   const pending = migrations
     .filter(m => !ran.includes(m.version))
@@ -14,25 +43,34 @@ export async function runMigrations(moduleId: string, migrations: Migration[]) {
 
   for (const m of pending) {
     console.info(`[db] ${moduleId} v${m.version}`);
-    db.run(m.sql);
-    db.run('INSERT INTO _migrations (module_id, version) VALUES (?, ?)', [moduleId, m.version]);
+    
+    // Split multi-statement SQL by semicolon and execute each separately
+    // PGlite prepared statements can't handle multiple statements at once
+    const statements = m.sql
+      .split(';')
+      .map(s => s.trim())
+      .filter(s => s.length > 0);
+    
+    for (const stmt of statements) {
+      await db.run(stmt, []);
+    }
+    
+    await db.run(
+      'INSERT INTO _migrations (module_id, version) VALUES ($1, $2)', 
+      [moduleId, m.version]
+    );
   }
 }
 
 /**
- * Llama esto UNA VEZ después de TODAS las migraciones.
- * Pausa el snapshot durante las migraciones para evitar
- * que un snapshot vacío sobreescriba datos previos.
+ * Ejecuta todas las migraciones de módulos
  */
 export async function initDb(allMigrations: { moduleId: string; migrations: Migration[] }[]) {
-  pauseSnapshot();  // ← congela el guardado
-
   for (const { moduleId, migrations } of allMigrations) {
-    if (migrations.length) await runMigrations(moduleId, migrations);
+    if (migrations.length) {
+      await runMigrations(moduleId, migrations);
+    }
   }
 
-  await restoreSnapshot(); // ← restaura datos en tablas ya creadas
-
-  resumeSnapshot(); // ← activa guardado normal
-  console.info('[db] ready');
+  console.info('[db] all migrations complete');
 }

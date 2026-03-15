@@ -26,7 +26,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     }
   }, [db, loading, restored]);
 
-  if (loading || !restored) {
+  if (loading || !restored || !db) {
     return (
       <div style={{
         height: '100vh', width: '100vw',

@@ -7,14 +7,15 @@
 //   • Las tareas van por: Backlog → Sprint → Doing → Review → Done
 //   • El Backlog es el pool de donde se jala al sprint actual
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { Plus, Trash2, ChevronRight, Flame, Target, Zap, Rocket } from 'lucide-react';
 import { ms } from '../../core/styles/tokens';
+import { useModuleData } from '../../core/hooks/useModuleData';
 import type { AppModule, ModuleProps } from '../../core/types/module';
 
 type Status = 'backlog' | 'sprint' | 'doing' | 'review' | 'done';
 
-interface Task {
+interface Task extends Record<string, unknown> {
   id:      number;
   titulo:  string;
   puntos:  number;
@@ -22,12 +23,12 @@ interface Task {
   sprint_id: number | null;
 }
 
-interface Sprint {
+interface Sprint extends Record<string, unknown> {
   id:         number;
   nombre:     string;
   inicio:     string;
   fin:        string;
-  activo:     number;  // 1 = activo
+  activo:     number;
 }
 
 const FIBONACCI = [1, 2, 3, 5, 8, 13];
@@ -40,8 +41,6 @@ const BOARD_COLS: { id: Status; label: string; color: string }[] = [
 ];
 
 const SprintComponent = ({ db }: ModuleProps) => {
-  const [tasks,        setTasks]        = useState<Task[]>([]);
-  const [sprint,       setSprint]       = useState<Sprint | null>(null);
   const [view,         setView]         = useState<'board' | 'backlog'>('board');
   const [newTitle,     setNewTitle]     = useState('');
   const [newPoints,    setNewPoints]    = useState(2);
@@ -49,63 +48,70 @@ const SprintComponent = ({ db }: ModuleProps) => {
   const [draggedTask,  setDraggedTask]  = useState<Task | null>(null);
   const [dragOverCol,  setDragOverCol]  = useState<Status | null>(null);
 
-  const load = useCallback(() => {
-    setTasks(db.all<Task>('SELECT * FROM sprint_tasks ORDER BY id ASC'));
-    const s = db.get<Sprint>('SELECT * FROM sprints WHERE activo = 1 LIMIT 1');
-    setSprint(s ?? null);
-  }, [db]);
+  const { data: tasks, reload: reloadTasks } = useModuleData<Task>(
+    db,
+    'SELECT * FROM sprint_tasks ORDER BY id ASC'
+  );
 
-  useEffect(() => { load(); }, [load]);
+  const { data: sprintData, reload: reloadSprint } = useModuleData<Sprint>(
+    db,
+    'SELECT * FROM sprints WHERE activo = 1'
+  );
+  const sprint = sprintData?.[0] ?? null;
+
+  const reload = useCallback(() => {
+    reloadTasks();
+    reloadSprint();
+  }, [reloadTasks, reloadSprint]);
 
   // ── Sprint management ──────────────────────────────
-  const createSprint = () => {
-    if (!newSprint.trim()) return;
-    // Desactiva sprint anterior
-    db.run('UPDATE sprints SET activo = 0');
+  const createSprint = async () => {
+    if (!newSprint.trim() || !db) return;
+    await db.run('UPDATE sprints SET activo = $1', [0]);
     const today = new Date();
     const end   = new Date(today); end.setDate(end.getDate() + 14);
-    const id = db.run(
-      "INSERT INTO sprints (nombre, inicio, fin, activo) VALUES (?,?,?,1)",
-      [newSprint.trim(), today.toISOString().slice(0,10), end.toISOString().slice(0,10)]
+    await db.run(
+      "INSERT INTO sprints (nombre, inicio, fin, activo) VALUES ($1, $2, $3, $4)",
+      [newSprint.trim(), today.toISOString().slice(0,10), end.toISOString().slice(0,10), 1]
     );
     setNewSprint('');
-    load();
+    await reload();
   };
 
-  const endSprint = () => {
-    if (!sprint) return;
-    // Mueve tareas no-done de vuelta al backlog
-    db.run("UPDATE sprint_tasks SET status='backlog', sprint_id=NULL WHERE status != 'done' AND sprint_id=?", [sprint.id]);
-    db.run('UPDATE sprints SET activo=0 WHERE id=?', [sprint.id]);
-    load();
+  const endSprint = async () => {
+    if (!sprint || !db) return;
+    await db.run("UPDATE sprint_tasks SET status=$1, sprint_id=$2 WHERE status != $3 AND sprint_id=$4", ['backlog', null, 'done', sprint.id]);
+    await db.run('UPDATE sprints SET activo=$1 WHERE id=$2', [0, sprint.id]);
+    await reload();
   };
 
   // ── Task management ────────────────────────────────
-  const addToBacklog = () => {
-    if (!newTitle.trim()) return;
-    db.run(
-      "INSERT INTO sprint_tasks (titulo, puntos, status, sprint_id) VALUES (?,?,'backlog',NULL)",
-      [newTitle.trim(), newPoints]
+  const addToBacklog = async () => {
+    if (!newTitle.trim() || !db) return;
+    await db.run(
+      "INSERT INTO sprint_tasks (titulo, puntos, status, sprint_id) VALUES ($1, $2, $3, $4)",
+      [newTitle.trim(), newPoints, 'backlog', null]
     );
     setNewTitle('');
-    load();
+    await reload();
   };
 
-  const pullToSprint = (task: Task) => {
-    if (!sprint) return;
-    db.run("UPDATE sprint_tasks SET status='sprint', sprint_id=? WHERE id=?", [sprint.id, task.id]);
-    load();
+  const pullToSprint = async (task: Task) => {
+    if (!sprint || !db) return;
+    await db.run("UPDATE sprint_tasks SET status=$1, sprint_id=$2 WHERE id=$3", ['sprint', sprint.id, task.id]);
+    await reload();
   };
 
-  const moveTask = (task: Task, newStatus: Status) => {
-    if (task.status === newStatus) return;
-    db.run('UPDATE sprint_tasks SET status=? WHERE id=?', [newStatus, task.id]);
-    load();
+  const moveTask = async (task: Task, newStatus: Status) => {
+    if (task.status === newStatus || !db) return;
+    await db.run('UPDATE sprint_tasks SET status=$1 WHERE id=$2', [newStatus, task.id]);
+    await reload();
   };
 
-  const deleteTask = (id: number) => {
-    db.run('DELETE FROM sprint_tasks WHERE id=?', [id]);
-    load();
+  const deleteTask = async (id: number) => {
+    if (!db) return;
+    await db.run('DELETE FROM sprint_tasks WHERE id=$1', [id]);
+    await reload();
   };
 
   // ── Stats ──────────────────────────────────────────
@@ -321,14 +327,14 @@ export const SprintModule: AppModule = {
       version: 1,
       sql: `
         CREATE TABLE IF NOT EXISTS sprints (
-          id      INTEGER PRIMARY KEY AUTOINCREMENT,
+          id      SERIAL PRIMARY KEY,
           nombre  TEXT    NOT NULL,
           inicio  TEXT    NOT NULL,
           fin     TEXT    NOT NULL,
           activo  INTEGER NOT NULL DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS sprint_tasks (
-          id        INTEGER PRIMARY KEY AUTOINCREMENT,
+          id        SERIAL PRIMARY KEY,
           titulo    TEXT    NOT NULL,
           puntos    INTEGER NOT NULL DEFAULT 1,
           status    TEXT    NOT NULL DEFAULT 'backlog',

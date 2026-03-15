@@ -1,57 +1,55 @@
-import { useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, ZoomIn, ZoomOut, Calendar, ChevronLeft, ChevronRight, Target, Map } from 'lucide-react';
+import { useState } from 'react';
+import { Plus, Trash2, ZoomIn, ZoomOut, ChevronLeft, ChevronRight, Target, Map } from 'lucide-react';
 import { ms } from '../../core/styles/tokens';
+import { useModuleData } from '../../core/hooks/useModuleData';
 import type { AppModule, ModuleProps } from '../../core/types/module';
 
-interface Epic {
+interface Epic extends Record<string, unknown> {
   id: number;
   nombre: string;
-  start_index: number; // Índice absoluto de meses
+  start_index: number;
   duration: number;
   progreso: number;
 }
 
 const RoadmapComponent = ({ db }: ModuleProps) => {
-  const [epics, setEpics] = useState<Epic[]>([]);
   const [newTitle, setNewTitle] = useState('');
   const [zoom, setZoom] = useState(100);
   
-  // Calcular el mes actual de forma absoluta (meses totales desde año 0 aprox)
   const now = new Date();
   const currentAbsMonth = now.getFullYear() * 12 + now.getMonth();
   
-  // Estado para saber qué mes mostrar al principio del scroll
-  const [viewStart, setViewStart] = useState(currentAbsMonth - 2); 
+  const [viewStart, setViewStart] = useState(currentAbsMonth - 2);
 
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const { data: epics, reload } = useModuleData<Epic>(
+    db,
+    'SELECT * FROM roadmap_epics ORDER BY id ASC'
+  );
 
-  const load = () => {
-    setEpics(db.all<Epic>(`SELECT * FROM roadmap_epics ORDER BY id ASC`));
-  };
-
-  useEffect(() => { load(); }, [db]);
-
-  const addEpic = () => {
-    if (!newTitle.trim()) return;
-    // Insertamos la épica iniciando en el mes que estamos viendo
-    db.run(`INSERT INTO roadmap_epics (nombre, start_index, duration, progreso) 
-            VALUES (?, ?, 3, 0)`, [newTitle, viewStart + 1]);
+  const addEpic = async () => {
+    if (!newTitle.trim() || !db) return;
+    await db.run(
+      'INSERT INTO roadmap_epics (nombre, start_index, duration, progreso) VALUES ($1, $2, $3, $4)',
+      [newTitle, viewStart + 1, 3, 0]
+    );
     setNewTitle('');
-    load();
+    await reload();
   };
 
-  const updateEpic = (id: number, fields: Partial<Epic>) => {
-    const keys = Object.keys(fields).map(k => `${k} = ?`).join(', ');
-    const values = [...Object.values(fields), id];
-    db.run(`UPDATE roadmap_epics SET ${keys} WHERE id = ?`, values);
-    load();
+  const updateEpic = async (id: number, fields: Partial<Epic>) => {
+    if (!db) return;
+    const keys = Object.keys(fields);
+    const values = Object.values(fields);
+    const setClauses = keys.map((k, i) => `${k} = $${i + 1}`).join(', ');
+    const params = [...values, id];
+    await db.run(`UPDATE roadmap_epics SET ${setClauses} WHERE id = $${keys.length + 1}`, params);
+    await reload();
   };
 
-  const deleteEpic = (id: number) => {
-    if (confirm('¿Eliminar esta épica?')) {
-      db.run(`DELETE FROM roadmap_epics WHERE id = ?`, [id]);
-      load();
-    }
+  const deleteEpic = async (id: number) => {
+    if (!confirm('¿Eliminar esta épica?') || !db) return;
+    await db.run('DELETE FROM roadmap_epics WHERE id = $1', [id]);
+    await reload();
   };
 
   // Función para formatear el header: "Ene 2024"
@@ -181,11 +179,11 @@ export const RoadmapModule: AppModule = {
   migrations: [{
     version: 4, 
     sql: `CREATE TABLE IF NOT EXISTS roadmap_epics (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      nombre TEXT NOT NULL,
+      id        SERIAL PRIMARY KEY,
+      nombre    TEXT    NOT NULL,
       start_index INTEGER DEFAULT 0,
-      duration INTEGER DEFAULT 3,
-      progreso INTEGER DEFAULT 0
+      duration  INTEGER DEFAULT 3,
+      progreso  INTEGER DEFAULT 0
     );`
   }]
 };

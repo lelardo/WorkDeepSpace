@@ -9,6 +9,49 @@ There are two types of components you can create:
 
 ---
 
+## Database System
+
+**WorkDeepSpace** supports two persistence modes:
+
+| Mode | Usage | Storage | Connection |
+|------|-------|---------|------------|
+| **Local (Development)** | `npm run dev:local` | PGlite (WASM) → IndexedDB | In-process |
+| **Remote (Production)** | `npm run dev:remote` | PostgreSQL (Neon, AWS RDS, etc.) | API Backend |
+
+### Configuration — `.env.local`
+
+```env
+# Operation mode
+VITE_DB_MODE=local        # or 'remote'
+
+# If VITE_DB_MODE=remote, configure the connection:
+VITE_DB_HOST=your-postgres-host
+VITE_DB_PORT=5432
+VITE_DB_NAME=your_database_name
+VITE_DB_USER=your_username
+VITE_DB_PASSWORD=your_password
+VITE_DB_SSL=true           # or false if connecting locally
+
+# API server port (remote only)
+API_PORT=3001
+```
+
+### Mode Auto-detection
+
+The framework automatically detects the mode from `VITE_DB_MODE`:
+- **local**: PGlite in the browser, data persisted in IndexedDB
+- **remote**: HTTP requests to `http://localhost:3001/api/db/*` (dev) or same host (prod)
+
+### Development scripts
+
+```bash
+npm run dev:local       # Vite + PGlite only (fast development)
+npm run dev:remote      # Node.js server + Vite (dev with real PostgreSQL)
+npm run build           # Production (compiled, requires Node backend in prod)
+```
+
+---
+
 ## TYPE 1 — Dashboard Module
 
 ### Structure
@@ -27,7 +70,7 @@ export const MyModule: AppModule = {
   id:          'my-module',     // unique across the app — no spaces
   name:        'My Module',
   description: 'What it does',
-  icon:        '🧩',            // emoji or ReactNode
+  icon:        <MyIcon size={20} />, // icon from lucide-react
 
   component: MyModuleComponent,
 
@@ -43,9 +86,9 @@ export const MyModule: AppModule = {
       version: 1,        // NEVER edit existing versions, only add new ones
       sql: `
         CREATE TABLE IF NOT EXISTS my_table (
-          id        INTEGER PRIMARY KEY AUTOINCREMENT,
+          id        SERIAL PRIMARY KEY,
           value     TEXT    NOT NULL,
-          created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
       `,
     },
@@ -53,18 +96,39 @@ export const MyModule: AppModule = {
 };
 ```
 
-**3.** Write the component:
-```tsx
-const MyModuleComponent = ({ db, dark }: ModuleProps) => {
-  const [items, setItems] = useState<MyType[]>([]);
+**⚠️ Important — PostgreSQL syntax:**
+- `SERIAL PRIMARY KEY` (not `AUTOINCREMENT`)
+- `TIMESTAMP DEFAULT CURRENT_TIMESTAMP` (not `datetime('now')`)
+- Parameters: `$1, $2, $3...` (not `?`)
 
-  useEffect(() => {
-    setItems(db.all<MyType>('SELECT * FROM my_table ORDER BY id DESC'));
-  }, [db]);
+**3.** Write the component using `useModuleData`:
+```tsx
+import { useModuleData } from '../../core/hooks/useModuleData';
+
+const MyModuleComponent = ({ db, dark }: ModuleProps) => {
+  const { data: items, loading, error, reload } = useModuleData<MyType>(
+    db,
+    'SELECT * FROM my_table ORDER BY id DESC'
+  );
+
+  const addItem = async () => {
+    if (!db) return;
+    await db.run(
+      'INSERT INTO my_table (value) VALUES ($1)',
+      ['new value']
+    );
+    await reload();  // ← important: wait for reload to complete
+  };
 
   return (
     <div style={ms.container}>
-      {/* use ms.* for styles consistent with the theme */}
+      {loading ? (
+        <div style={ms.empty}>Loading…</div>
+      ) : items.length === 0 ? (
+        <div style={ms.empty}>No data</div>
+      ) : (
+        items.map(item => /* render */)
+      )}
     </div>
   );
 };
@@ -91,7 +155,7 @@ The `OverlayLayer` handles all the positioning, drag, snap, and stacking logic. 
 
 ### Structure
 ```
-src/overlays/my-overlay/
+src/overlay_modules/my-overlay/
 └── index.tsx
 ```
 
@@ -101,62 +165,75 @@ export const MyOverlay: OverlayWidget = {
   id:            'my-overlay',
   component:     MyOverlayComponent,
   defaultCorner: 'bottom-right',  // 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left'
-  panelWidth:    340,             // ← IMPORTANT: OverlayLayer uses this for positioning the panel
-  panelHeight:   480,             // ← IMPORTANT: same
+  panelWidth:    340,
+  panelHeight:   480,
   migrations:    [],
 };
 ```
 
-### Component
+### Component with persistence
 ```tsx
+import { useModuleData } from '../../core/hooks/useModuleData';
+
 function MyOverlayComponent({
   db, user,
-  panelX, panelY,       // panel coordinates relative to shell — DON'T calculate this yourself
-  didDragRef,           // shared ref: true if mouseup was drag, not click
-  onDragStart,          // pass to onMouseDown of FAB
-  onPanelOpen,          // call when panel opens
-  onPanelClose,         // call when panel closes
+  panelX, panelY,
+  didDragRef,
+  onDragStart,
+  onPanelOpen,
+  onPanelClose,
 }: OverlayProps) {
   const [open, setOpen] = useState(false);
+  const { data: items, reload } = useModuleData<MyType>(
+    db,
+    'SELECT * FROM my_table WHERE user_id = $1 ORDER BY id DESC',
+    [user.id]
+  );
 
   const toggleOpen = () => {
-    if (didDragRef.current) return;  // ignore if it was a drag
+    if (didDragRef.current) return;
     const next = !open;
     setOpen(next);
     next ? onPanelOpen() : onPanelClose();
   };
 
+  const addItem = async () => {
+    if (!db) return;
+    await db.run(
+      'INSERT INTO my_table (user_id, value) VALUES ($1, $2)',
+      [user.id, 'new']
+    );
+    await reload();  // ← always wait
+  };
+
   return (
     <>
-      {/* Panel — position:absolute, coords given by OverlayLayer */}
       {open && (
         <div
-          onMouseDown={e => e.stopPropagation()}  // prevents panel from activating drag
+          onMouseDown={e => e.stopPropagation()}
           style={{
             position: 'absolute',
             left: `${panelX}px`,
             top:  `${panelY}px`,
             zIndex: 300,
-            width: `${PANEL_W}px`,
-            height: `${PANEL_H}px`,
-            // ... rest of styles
+            width: '340px',
+            height: '480px',
+            // ... styles
           }}
         >
-          {/* content */}
+          {/* content — use items */}
         </div>
       )}
 
-      {/* FAB — onMouseDown activates drag in OverlayLayer */}
       <button
-        onMouseDown={onDragStart}   // ← activates drag
-        onClick={toggleOpen}        // ← opens/closes panel (only if not a drag)
+        onMouseDown={onDragStart}
+        onClick={toggleOpen}
         style={{
           position: 'absolute', left: 0, top: 0,
-          width: `${FAB_SIZE}px`, height: `${FAB_SIZE}px`,
+          width: '44px', height: '44px',
           borderRadius: '22px',
           cursor: 'grab',
           pointerEvents: 'auto',
-          // ...
         }}
       >
         {open ? <X size={22}/> : <MyIcon size={22}/>}
@@ -166,25 +243,9 @@ function MyOverlayComponent({
 }
 ```
 
-### How positioning works
-
-The `OverlayLayer` automatically calculates:
-
-- **FAB position** — assigned corner (`defaultCorner`) with automatic stacking if there are multiple in the same corner
-- **Panel position** — next to the FAB, vertically aligned:
-  - FAB on the left → panel to its right
-  - FAB on the right → panel to its left
-  - FAB on top → panel aligned to FAB's top
-  - FAB on bottom → panel aligned to FAB's bottom
-- **Drag & snap** — when released, FAB snaps to the nearest corner with spring animation
-- **Stacking** — if there are multiple overlays in the same corner, they stack on top of each other without overlapping
-- **Z-index** — the overlay with open panel automatically moves to the top
-
-**The component doesn't need to calculate any of this** — just use `panelX`/`panelY` as they arrive.
-
 ### Register in `src/core/overlay/overlayRegistry.ts`:
 ```ts
-import { MyOverlay } from '../../overlays/my-overlay';
+import { MyOverlay } from '../../overlay_modules/my-overlay';
 
 const OVERLAYS: OverlayWidget[] = [
   ChatOverlay,
@@ -195,77 +256,120 @@ const OVERLAYS: OverlayWidget[] = [
 
 ---
 
-## Available Props
-
-### ModuleProps (dashboard modules)
-```ts
-interface ModuleProps {
-  db:      DbApi;    // database ready to use
-  dark?:   boolean;
-  config?: Record<string, unknown>;
-}
-// Note: for the user use useSession() inside the component
-```
-
-### OverlayProps (floating overlays)
-```ts
-interface OverlayProps {
-  db:             DbApi;
-  user:           User;           // always available in overlays
-  dark?:          boolean;
-  panelX:         number;         // panel position (relative to shell)
-  panelY:         number;         // calculated by OverlayLayer — use it directly
-  didDragRef:     RefObject<boolean>; // read .current in onClick to distinguish drag from click
-  onDragStart:    (e: React.MouseEvent) => void;
-  onPanelOpen:    () => void;
-  onPanelClose:   () => void;
-}
-```
-
----
-
 ## Database API (`db`)
 
+All operations are **async** — always use `await`:
+
 ```ts
-// Write — returns lastInsertRowid
-db.run('INSERT INTO my_table (value) VALUES (?)', ['hello'])
+// Write — INSERT, UPDATE, DELETE, CREATE TABLE
+await db.run('INSERT INTO my_table (value) VALUES ($1)', ['hello'])
 
-// Read multiple
-db.all<MyType>('SELECT * FROM my_table ORDER BY id DESC')
+// Read multiple — returns array
+const items = await db.all<MyType>('SELECT * FROM my_table ORDER BY id DESC')
 
-// Read single row
-db.get<MyType>('SELECT * FROM my_table WHERE id = ?', [1])
+// Read single row — returns object or undefined
+const item = await db.get<MyType>('SELECT * FROM my_table WHERE id = $1', [1])
 ```
 
-**Important with SQLite WASM:** always use single quotes in SQL for string literals:
+**Parameters:** Always use `$1, $2, $3...` (PostgreSQL style):
 ```ts
 // ✅ correct
-db.run("UPDATE table SET edited_at=datetime('now') WHERE id=?", [id])
+await db.run("UPDATE table SET value=$1, edited_at=CURRENT_TIMESTAMP WHERE id=$2", ['new', 5])
 
-// ❌ incorrect — double quotes inside template string
-db.run(`UPDATE table SET edited_at=datetime("now") WHERE id=?`, [id])
+// ❌ incorrect (SQLite style)
+await db.run("UPDATE table SET value=?, edited_at=datetime('now') WHERE id=?", ['new', 5])
 ```
-
-Data is automatically saved to `localStorage` after each `db.run()` and restored on reload.
 
 ---
 
-## Session User (`useSession`)
+## Reactive Hook — `useModuleData`
 
-Available from any module component:
+Executes a query and automatically re-renders:
+
 ```ts
-import { useSession } from '../../core/auth/authStore';
+import { useModuleData } from '../../core/hooks/useModuleData';
 
-const session = useSession(); // Session | null
+const { data, loading, error, reload } = useModuleData<MyType>(
+  db,
+  'SELECT * FROM my_table WHERE status = $1',
+  ['active'],  // parameters
+  []           // optional dependencies
+);
 
-if (session) {
-  session.user.id            // number
-  session.user.username      // string
-  session.user.display_name  // string
-}
+// Inside a handler (create, edit, delete):
+const handleAdd = async () => {
+  await db.run('INSERT INTO my_table VALUES ...', [...]);
+  await reload();  // ← updates data automatically
+};
 ```
 
-In overlays the user arrives directly as a `user: User` prop (always available because overlays only mount with an active session).
+**Properties:**
+- `data: MyType[]` — query results
+- `loading: boolean` — true while executing
+- `error: Error | null` — error if any
+- `reload: () => Promise<void>` — re-execute the query
+
+---
+
+## Persistence — How it works
+
+### Local Mode (PGlite)
+
+1. **Storage**: Browser's IndexedDB
+2. **Lifecycle**:
+   - App starts → PGlite creates BD in memory
+   - Tables are created via migrations
+   - Each operation syncs to IndexedDB automatically
+   - On reload → restored from IndexedDB
+3. **Data persists between sessions**: Yes (unless you clear IndexedDB)
+
+```bash
+npm run dev:local
+# Data lives in: IndexedDB → idb://modular-workspace
+```
+
+### Remote Mode (PostgreSQL + API)
+
+1. **Storage**: Real PostgreSQL database (Neon, AWS RDS, etc.)
+2. **Architecture**:
+   - **Client** (browser) → Vite on port 5173
+   - **Backend** (Node.js) → Express on port 3001
+   - Client makes fetch calls to `/api/db/{run,all,get}`
+   - Backend connects to PostgreSQL with `.env.local` credentials
+3. **Migrations**: Execute once on the server, recorded in `_migrations`
+4. **Persistence**: Data in PostgreSQL = permanent data in the real database
+
+```bash
+npm run dev:remote
+# Dev: frontend → Vite proxy (5173) → backend (3001) → PostgreSQL (5432)
+# Prod: frontend → backend (same host) → PostgreSQL
+```
+
+---
+
+## Users and sessions
+
+Filter all tables by `user_id` for multi-tenancy:
+
+```ts
+// In modules — get the user with useSession()
+import { useSession } from '../../core/auth/authStore';
+
+const session = useSession();
+const userId = session?.user.id;
+
+// Query filtering by user
+const { data } = useModuleData<MyType>(
+  db,
+  'SELECT * FROM my_table WHERE user_id = $1',
+  [userId]
+);
+
+// In overlays — user arrives as prop
+const MyOverlay = ({ user, db }: OverlayProps) => {
+  const { data } = useModuleData(db, '... WHERE user_id = $1', [user.id]);
+};
+```
 
 ---
 
@@ -300,9 +404,25 @@ All use CSS variables (`var(--text)`, `var(--bg-card)`, etc.) — they automatic
 
 ---
 
-## Summary — Files to touch
+## Workflow Summary
 
-| What to create | New file | File to edit |
-|-----------|--------------|-----------------|
-| Dashboard module | `src/modules/my-module/index.tsx` | `src/core/registry/index.ts` |
-| Floating overlay | `src/overlays/my-overlay/index.tsx` | `src/core/overlay/overlayRegistry.ts` |
+| Step | What to do |
+|------|-----------|
+| 1. Create module | Copy `_template` → `src/modules/my-module/` |
+| 2. Define table | Add migration with `CREATE TABLE` (PostgreSQL syntax) |
+| 3. Write component | Use `useModuleData` for reactive queries |
+| 4. Import data | `const { data, reload } = useModuleData(...)` |
+| 5. Modify data | `await db.run(...)` followed by `await reload()` |
+| 6. Register | Add in `src/core/registry/index.ts` |
+| 7. Test | `npm run dev:local` (fast) or `npm run dev:remote` (PostgreSQL) |
+
+---
+
+## Key files
+
+- **`.env.local`** — Environment variables (DO NOT commit)
+- **`server.js`** — Express backend (remote mode only)
+- **`src/core/db/db.ts`** — Database abstraction (local/remote automatic)
+- **`src/core/db/migrations.ts`** — Migration system
+- **`src/core/hooks/useModuleData.ts`** — Reactive query hook
+

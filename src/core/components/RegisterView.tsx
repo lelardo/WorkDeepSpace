@@ -34,7 +34,7 @@ export function RegisterView({ db, onSwitch }: { db: DbApi; onSwitch: () => void
             Crear cuenta
           </h1>
           <p style={{ margin: '0.25rem 0 0', fontFamily: 'var(--sans)', fontSize: '0.8rem', color: 'var(--text-faint)' }}>
-            Workspace v0.1.0
+            WorkDeepSpace v0.1.0
           </p>
         </div>
 

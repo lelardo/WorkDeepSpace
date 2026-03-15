@@ -1,36 +1,34 @@
-// src/overlays/chat/index.tsx
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { MessageSquare, Send, X } from 'lucide-react';
 import { ms } from '../../core/styles/tokens';
+import { useModuleData } from '../../core/hooks/useModuleData';
 import type { OverlayWidget, OverlayProps } from '../../core/overlay/types';
 import { FAB_SIZE } from '../../core/overlay/types';
 
-interface Msg { id:number; user_id:number; display_name:string; mensaje:string; creado_en:string; }
+interface Msg extends Record<string, unknown> { id:number; user_id:number; display_name:string; mensaje:string; creado_en:string; }
 
 const PANEL_W = 320;
 const PANEL_H = 460;
 
 function ChatOverlayComponent({ db, user, panelX, panelY, didDragRef, onDragStart, onPanelOpen, onPanelClose }: OverlayProps) {
   const [open,     setOpen]     = useState(false);
-  const [messages, setMessages] = useState<Msg[]>([]);
   const [input,    setInput]    = useState('');
-  const [lastSeen, setLastSeen] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const load = useCallback(() => {
-    try {
-      setMessages(db.all<Msg>(`
-        SELECT m.id, m.user_id, u.display_name, m.mensaje, m.creado_en
-        FROM chat_messages m JOIN users u ON u.id = m.user_id ORDER BY m.id ASC
-      `));
-    } catch { /* tabla no existe aún */ }
-  }, [db]);
+  const { data: messages, reload } = useModuleData<Msg>(
+    db,
+    'SELECT m.id, m.user_id, u.display_name, m.mensaje, m.creado_en FROM chat_messages m JOIN users u ON u.id = m.user_id ORDER BY m.id ASC'
+  );
 
-  useEffect(() => { load(); const t = setInterval(load, 3000); return () => clearInterval(t); }, [load]);
-  useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [messages, open]);
-  useEffect(() => { if (open && messages.length > 0) setLastSeen(messages[messages.length - 1].id); }, [open, messages]);
+  useEffect(() => { 
+    // Poll every 5 seconds for new messages
+    const t = setInterval(reload, 5000);
+    return () => clearInterval(t);
+  }, [reload]);
 
-  const unread = messages.filter(m => m.id > lastSeen && m.user_id !== user.id).length;
+  useEffect(() => { 
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages, open]);
 
   const toggleOpen = () => {
     if (didDragRef.current) return;
@@ -39,10 +37,11 @@ function ChatOverlayComponent({ db, user, panelX, panelY, didDragRef, onDragStar
     next ? onPanelOpen() : onPanelClose();
   };
 
-  const send = () => {
-    if (!input.trim()) return;
-    db.run('INSERT INTO chat_messages (user_id, mensaje) VALUES (?, ?)', [user.id, input.trim()]);
-    load(); setInput('');
+  const send = async () => {
+    if (!input.trim() || !db) return;
+    await db.run('INSERT INTO chat_messages (user_id, mensaje) VALUES ($1, $2)', [user.id, input.trim()]);
+    await reload();
+    setInput('');
   };
 
   return (
@@ -134,8 +133,10 @@ export const ChatOverlay: OverlayWidget = {
   migrations: [{
     version: 1,
     sql: `CREATE TABLE IF NOT EXISTS chat_messages (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL,
-      mensaje TEXT NOT NULL, creado_en TEXT NOT NULL DEFAULT (datetime('now'))
+      id        SERIAL PRIMARY KEY,
+      user_id   INTEGER NOT NULL,
+      mensaje   TEXT    NOT NULL,
+      creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );`,
   }],
 };

@@ -40,21 +40,23 @@ export async function register(
   if (password.length < 4)
     return { ok: false, error: 'La contraseña debe tener al menos 4 caracteres.' };
 
-  const exists = db.get('SELECT id FROM users WHERE username = ?', [username]);
+  const exists = await db.get('SELECT id FROM users WHERE username = $1', [username]);
   if (exists) return { ok: false, error: 'Ese nombre de usuario ya está en uso.' };
 
   const hash = await hashPassword(password);
-  const id   = db.run(
-    'INSERT INTO users (username, display_name, password_hash) VALUES (?, ?, ?)',
+  await db.run(
+    'INSERT INTO users (username, display_name, password_hash) VALUES ($1, $2, $3)',
     [username, displayName, hash]
   );
 
   const user: User = {
-    id, username, display_name: displayName,
+    id: 0, // Will be set from the database on restore
+    username,
+    display_name: displayName,
     created_at: new Date().toISOString(),
   };
   const token = generateToken();
-  db.run('INSERT INTO sessions (token, user_id) VALUES (?, ?)', [token, id]);
+  await db.run('INSERT INTO sessions (token, user_id, created_at) VALUES ($1, (SELECT id FROM users WHERE username = $2), CURRENT_TIMESTAMP)', [token, username]);
   sessionActions.login(user, token);
   return { ok: true, user };
 }
@@ -69,8 +71,8 @@ export async function login(
   if (!username || !password)
     return { ok: false, error: 'Completa todos los campos.' };
 
-  const row = db.get<{ id: number; username: string; display_name: string; password_hash: string; created_at: string }>(
-    'SELECT * FROM users WHERE username = ?', [username]
+  const row = await db.get<{ id: number; username: string; display_name: string; password_hash: string; created_at: string }>(
+    'SELECT * FROM users WHERE username = $1', [username]
   );
   if (!row) return { ok: false, error: 'Usuario no encontrado.' };
 
@@ -80,20 +82,20 @@ export async function login(
 
   const user: User = { id: row.id, username: row.username, display_name: row.display_name, created_at: row.created_at };
   const token = generateToken();
-  db.run('INSERT INTO sessions (token, user_id) VALUES (?, ?)', [token, user.id]);
+  await db.run('INSERT INTO sessions (token, user_id, created_at) VALUES ($1, $2, CURRENT_TIMESTAMP)', [token, user.id]);
   sessionActions.login(user, token);
   return { ok: true, user };
 }
 
 // ── Restaurar sesión desde token guardado ──────────────
-export function restoreSession(db: DbApi): void {
+export async function restoreSession(db: DbApi): Promise<void> {
   const token = sessionActions.getSavedToken();
   if (!token) return;
 
-  const row = db.get<{ id: number; username: string; display_name: string; created_at: string }>(
+  const row = await db.get<{ id: number; username: string; display_name: string; created_at: string }>(
     `SELECT u.id, u.username, u.display_name, u.created_at
      FROM sessions s JOIN users u ON u.id = s.user_id
-     WHERE s.token = ?`,
+     WHERE s.token = $1`,
     [token]
   );
   if (!row) { sessionActions.logout(); return; }

@@ -3,9 +3,10 @@ import { useState, useEffect, useRef } from 'react';
 import { Send, MessageSquare } from 'lucide-react';
 import { ms } from '../../core/styles/tokens';
 import { useSession } from '../../core/auth/authStore';
+import { useModuleData } from '../../core/hooks/useModuleData';
 import type { AppModule, ModuleProps } from '../../core/types/module';
 
-interface ChatMessage {
+interface ChatMessage extends Record<string, unknown> {
   id:           number;
   user_id:      number;
   username:     string;
@@ -16,29 +17,21 @@ interface ChatMessage {
 
 const ChatModuleComponent = ({ db }: ModuleProps) => {
   const session   = useSession();
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input,    setInput]    = useState('');
+  const { data: messages, reload } = useModuleData<ChatMessage>(
+    db,
+    'SELECT m.id, m.user_id, u.username, u.display_name, m.mensaje, m.creado_en FROM chat_messages m JOIN users u ON u.id = m.user_id ORDER BY m.id ASC'
+  );
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const load = () => {
-    const rows = db.all<ChatMessage>(`
-      SELECT m.id, m.user_id, u.username, u.display_name, m.mensaje, m.creado_en
-      FROM chat_messages m
-      JOIN users u ON u.id = m.user_id
-      ORDER BY m.id ASC
-    `);
-    setMessages(rows);
-  };
-
-  useEffect(() => { load(); }, [db]);
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages]);
 
-  const handleSend = () => {
-    if (!input.trim() || !session) return;
-    db.run('INSERT INTO chat_messages (user_id, mensaje) VALUES (?, ?)', [session.user.id, input.trim()]);
-    load();
+  const handleSend = async () => {
+    if (!input.trim() || !session || !db) return;
+    await db.run('INSERT INTO chat_messages (user_id, mensaje) VALUES ($1, $2)', [session.user.id, input.trim()]);
+    await reload();
     setInput('');
   };
 
@@ -100,10 +93,10 @@ export const ChatModule: AppModule = {
   migrations: [{
     version: 1,
     sql: `CREATE TABLE IF NOT EXISTS chat_messages (
-      id        INTEGER PRIMARY KEY AUTOINCREMENT,
+      id        SERIAL PRIMARY KEY,
       user_id   INTEGER NOT NULL REFERENCES users(id),
       mensaje   TEXT    NOT NULL,
-      creado_en TEXT    NOT NULL DEFAULT (datetime('now'))
+      creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );`,
   }],
 };

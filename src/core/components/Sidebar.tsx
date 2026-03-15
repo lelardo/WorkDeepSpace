@@ -32,7 +32,7 @@ export function Sidebar() {
         <div className="sidebar-header">
           <span className="sidebar-logo">⬡</span>
           <div>
-            <div className="sidebar-title">Workspace</div>
+            <div className="sidebar-title">WorkDeepSpace</div>
             <div className="sidebar-version">v0.1.0</div>
           </div>
         </div>

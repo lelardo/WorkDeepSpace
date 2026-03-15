@@ -1,11 +1,12 @@
 // src/modules/kanban/index.tsx
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
 import { Plus, Trash2, GripVertical, LayoutGrid } from 'lucide-react';
 import { ms } from '../../core/styles/tokens';
+import { useModuleData } from '../../core/hooks/useModuleData';
 import type { AppModule, ModuleProps } from '../../core/types/module';
 
 type Status = 'todo' | 'in_progress' | 'done';
-interface Task { id: number; title: string; status: Status; position: number; }
+interface Task extends Record<string, unknown> { id: number; title: string; status: Status; position: number; }
 
 const COLUMNS: { status: Status; label: string; badge: 'default'|'warning'|'success' }[] = [
   { status: 'todo',        label: 'To Do',       badge: 'default'  },
@@ -14,34 +15,46 @@ const COLUMNS: { status: Status; label: string; badge: 'default'|'warning'|'succ
 ];
 
 const KanbanComponent = ({ db }: ModuleProps) => {
-  const [tasks,    setTasks]    = useState<Task[]>([]);
+  // Query tasks ordenados por posición
+  const { data: tasks, reload } = useModuleData<Task>(
+    db,
+    'SELECT id, title, status, position FROM kanban_tasks ORDER BY position ASC'
+  );
+
   const [input,    setInput]    = useState('');
   const [addingTo, setAddingTo] = useState<Status | null>(null);
   const [dragging, setDragging] = useState<Task | null>(null);
   const [dragOver, setDragOver] = useState<Status | null>(null);
 
-  const load = useCallback(() => {
-    const rows = db.all<Task>('SELECT id, title, status, position FROM kanban_tasks ORDER BY position ASC');
-    setTasks(rows);
-  }, [db]);
-
-  useEffect(() => { load(); }, [load]);
-
-  const addTask = (status: Status) => {
+  const addTask = async (status: Status) => {
     const title = input.trim();
-    if (!title) return;
+    if (!title || !db || !tasks) return;
     const maxPos = tasks.filter(t => t.status === status).reduce((m, t) => Math.max(m, t.position), -1);
-    db.run('INSERT INTO kanban_tasks (title, status, position) VALUES (?, ?, ?)', [title, status, maxPos + 1]);
-    setInput(''); setAddingTo(null); load();
+    await db.run(
+      'INSERT INTO kanban_tasks (title, status, position) VALUES ($1, $2, $3)',
+      [title, status, maxPos + 1]
+    );
+    setInput(''); 
+    setAddingTo(null); 
+    await reload();
   };
 
-  const deleteTask = (id: number) => { db.run('DELETE FROM kanban_tasks WHERE id = ?', [id]); load(); };
+  const deleteTask = async (id: number) => {
+    if (!db) return;
+    await db.run('DELETE FROM kanban_tasks WHERE id = $1', [id]);
+    await reload();
+  };
 
-  const moveTask = (task: Task, newStatus: Status) => {
-    if (task.status === newStatus) return;
+  const moveTask = async (task: Task, newStatus: Status) => {
+    if (task.status === newStatus || !db || !tasks) return;
     const maxPos = tasks.filter(t => t.status === newStatus).reduce((m, t) => Math.max(m, t.position), -1);
-    db.run('UPDATE kanban_tasks SET status = ?, position = ? WHERE id = ?', [newStatus, maxPos + 1, task.id]);
-    load();
+    await db.run(
+      'UPDATE kanban_tasks SET status = $1, position = $2 WHERE id = $3',
+      [newStatus, maxPos + 1, task.id]
+    );
+    setDragging(null);
+    setDragOver(null);
+    await reload();
   };
 
   const byStatus = (s: Status) => tasks.filter(t => t.status === s);
@@ -61,7 +74,7 @@ const KanbanComponent = ({ db }: ModuleProps) => {
           }}
             onDragOver={e => { e.preventDefault(); setDragOver(col.status); }}
             onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOver(null); }}
-            onDrop={() => { if (dragging) moveTask(dragging, col.status); setDragging(null); setDragOver(null); }}
+            onDrop={() => { if (dragging) moveTask(dragging, col.status); }}
           >
             {/* Header */}
             <div style={{
@@ -133,18 +146,22 @@ const KanbanComponent = ({ db }: ModuleProps) => {
 };
 
 export const KanbanModule: AppModule = {
-  id: 'kanban', name: 'Kanban', description: 'Task board with drag & drop', author: 'lelardo', icon: <LayoutGrid size={20} />,
+  id: 'kanban', 
+  name: 'Kanban', 
+  description: 'Task board with drag & drop', 
+  author: 'lelardo', 
+  icon: <LayoutGrid size={20} />,
   component: KanbanComponent,
   layout: { defaultCols: 6, defaultRows: 4, isMinimizable: true, canExpandFull: true },
   migrations: [{
     version: 1,
     sql: `
       CREATE TABLE IF NOT EXISTS kanban_tasks (
-        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        id         SERIAL PRIMARY KEY,
         title      TEXT    NOT NULL,
         status     TEXT    NOT NULL DEFAULT 'todo' CHECK(status IN ('todo','in_progress','done')),
         position   INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
       CREATE INDEX IF NOT EXISTS idx_kanban_status ON kanban_tasks(status);
     `,

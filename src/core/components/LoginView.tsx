@@ -25,7 +25,7 @@ export function LoginView({ db, onSwitch }: { db: DbApi; onSwitch: () => void })
         <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
           <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>⬡</div>
           <h1 style={{ margin: 0, fontFamily: 'var(--sans)', fontSize: '1.25rem', fontWeight: 700, color: 'var(--text)' }}>
-            Workspace
+            WorkDeepSpace
           </h1>
           <p style={{ margin: '0.25rem 0 0', fontFamily: 'var(--sans)', fontSize: '0.8rem', color: 'var(--text-faint)' }}>
             Inicia sesión para continuar

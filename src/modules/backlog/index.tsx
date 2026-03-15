@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
-import { ListTodo, Plus, Layers, Hash, ChevronUp, ChevronDown } from 'lucide-react';
+import { useState } from 'react';
+import { ListTodo, Plus, Layers, Hash, ChevronUp, ChevronDown, X } from 'lucide-react';
 import { ms } from '../../core/styles/tokens';
+import { useModuleData } from '../../core/hooks/useModuleData';
 import type { AppModule, ModuleProps } from '../../core/types/module';
 
-interface BacklogItem {
+interface BacklogItem extends Record<string, unknown> {
   id: number;
   titulo: string;
   epica: string;
@@ -13,38 +14,38 @@ interface BacklogItem {
 }
 
 const BacklogModuleComponent = ({ db }: ModuleProps) => {
-  const [items, setItems] = useState<BacklogItem[]>([]);
+  const { data: items, reload } = useModuleData<BacklogItem>(
+    db,
+    'SELECT * FROM backlog_items ORDER BY prioridad DESC, id DESC'
+  );
   const [newTitle, setNewTitle] = useState('');
 
-  const load = () => {
-    const rows = db.all<BacklogItem>(`
-      SELECT * FROM backlog_items 
-      ORDER BY prioridad DESC, id DESC
-    `);
-    setItems(rows);
-  };
-
-  useEffect(() => { load(); }, [db]);
-
-  const addItem = () => {
-    if (!newTitle.trim()) return;
-    db.run(
-      `INSERT INTO backlog_items (titulo, epica, puntos, estado, prioridad) 
-       VALUES (?, 'General', 0, 'backlog', 0)`,
-      [newTitle]
+  const addItem = async () => {
+    if (!newTitle.trim() || !db) return;
+    await db.run(
+      'INSERT INTO backlog_items (titulo, epica, puntos, estado, prioridad) VALUES ($1, $2, $3, $4, $5)',
+      [newTitle, 'General', 0, 'backlog', 0]
     );
     setNewTitle('');
-    load();
+    await reload();
   };
 
-  const updatePoints = (id: number, pts: number) => {
-    db.run(`UPDATE backlog_items SET puntos = ? WHERE id = ?`, [pts, id]);
-    load();
+  const updatePoints = async (id: number, pts: number) => {
+    if (!db) return;
+    await db.run('UPDATE backlog_items SET puntos = $1 WHERE id = $2', [pts, id]);
+    await reload();
   };
 
-  const changePriority = (id: number, current: number, delta: number) => {
-    db.run(`UPDATE backlog_items SET prioridad = ? WHERE id = ?`, [current + delta, id]);
-    load();
+  const changePriority = async (id: number, current: number, delta: number) => {
+    if (!db) return;
+    await db.run('UPDATE backlog_items SET prioridad = $1 WHERE id = $2', [current + delta, id]);
+    await reload();
+  };
+
+  const deleteItem = async (id: number) => {
+    if (!db || !confirm('¿Eliminar esta historia?')) return;
+    await db.run('DELETE FROM backlog_items WHERE id = $1', [id]);
+    await reload();
   };
 
   return (
@@ -123,6 +124,15 @@ const BacklogModuleComponent = ({ db }: ModuleProps) => {
                       <ChevronDown size={16} />
                     </button>
                   </div>
+
+                  {/* Eliminar */}
+                  <button 
+                    style={{ ...ms.btn.ghost, color: 'var(--danger)' }}
+                    onClick={() => deleteItem(item.id)}
+                    title="Eliminar historia"
+                  >
+                    <X size={16} />
+                  </button>
                 </div>
 
               </div>
@@ -155,13 +165,13 @@ export const BacklogModule: AppModule = {
       version: 1,
       sql: `
         CREATE TABLE IF NOT EXISTS backlog_items (
-          id        INTEGER PRIMARY KEY AUTOINCREMENT,
+          id        SERIAL PRIMARY KEY,
           titulo    TEXT    NOT NULL,
           epica     TEXT    DEFAULT 'General',
           puntos    INTEGER DEFAULT 0,
           estado    TEXT    DEFAULT 'backlog',
           prioridad INTEGER DEFAULT 0,
-          creado_en TEXT    NOT NULL DEFAULT (datetime('now'))
+          creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
       `
     }
