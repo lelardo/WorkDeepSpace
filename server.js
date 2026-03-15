@@ -2,6 +2,11 @@ import express from 'express';
 import cors from 'cors';
 import { Pool } from 'pg';
 import dotenv from 'dotenv';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 dotenv.config({ path: '.env.local' });
 
@@ -134,6 +139,14 @@ app.post('/api/migrations/run', async (req, res) => {
     console.error('[api:migrations:run]', e.message);
     res.status(500).json({ error: e.message });
   }
+});
+
+// Servir archivos estáticos desde dist/ (para Electron)
+app.use(express.static(join(__dirname, 'dist')));
+
+// SPA fallback - sirve index.html para rutas desconocidas
+app.get('*', (req, res) => {
+  res.sendFile(join(__dirname, 'dist', 'index.html'));
 });
 
 const PORT = process.env.API_PORT || 3001;

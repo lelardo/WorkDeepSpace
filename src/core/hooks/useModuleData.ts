@@ -9,7 +9,7 @@
  *   );
  */
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import type { DbApi, Row } from '../db/types';
 
 export function useModuleData<T extends Row>(

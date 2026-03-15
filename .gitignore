@@ -4,6 +4,11 @@ node_modules/
 # Build output
 dist/
 dist-ssr/
+out/
+
+# Electron (optional, local build only)
+electron/
+release/
 
 # Vite cache
 .vite/
@@ -37,6 +42,3 @@ Thumbs.db
 *.sln
 *.swp
 *.swo
-
-# Misc
-.env.example  # Optional: version control .env.example, then uncomment at end
