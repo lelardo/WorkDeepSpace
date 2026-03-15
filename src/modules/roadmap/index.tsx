@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, ZoomIn, ZoomOut, Calendar, ChevronLeft, ChevronRight, Target } from 'lucide-react';
+import { Plus, Trash2, ZoomIn, ZoomOut, Calendar, ChevronLeft, ChevronRight, Target, Map } from 'lucide-react';
 import { ms } from '../../core/styles/tokens';
 import type { AppModule, ModuleProps } from '../../core/types/module';
 
@@ -174,7 +174,8 @@ export const RoadmapModule: AppModule = {
   id: 'mod-roadmap',
   name: 'Roadmap',
   description: 'Timeline con años y meses',
-  icon: <Calendar size={20} />,
+  author: 'lelardo',
+  icon: <Map size={20} />,
   component: RoadmapComponent,
   layout: { defaultCols: 12, defaultRows: 6, isMinimizable: true, canExpandFull: true },
   migrations: [{

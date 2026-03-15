@@ -139,6 +139,7 @@ export const BacklogModule: AppModule = {
   id: 'mod-backlog',
   name: 'Backlog',
   description: 'Priorización de Historias de Usuario',
+  author: 'lelardo',
   icon: <ListTodo size={20} />,
   component: BacklogModuleComponent,
 

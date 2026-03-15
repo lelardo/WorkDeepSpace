@@ -1,11 +1,4 @@
 // src/core/components/Dashboard.tsx
-//
-// Layout de filas con divisores arrastrables (split panes).
-// - Los módulos activos se distribuyen en filas
-// - Dentro de cada fila, paneles separados por divisores arrastrables
-// - Arrastrar el divisor redistribuye el ancho entre vecinos
-// - Entre filas hay un divisor horizontal para cambiar alturas
-
 import { useRef, useState, useCallback, useEffect } from 'react';
 import { X, Minus, Maximize2, Minimize2 } from 'lucide-react';
 import { useModuleStore } from '../store/useModuleStore';
@@ -13,13 +6,22 @@ import { useTheme } from '../context/ThemeContext';
 import { Registry } from '../registry/index';
 import { useDb } from '../db/useDb';
 
-const DIVIDER_SIZE = 5; // px
+const LS_SIZES_KEY = 'workspace_panel_sizes';
 
-// Agrupa ids en filas según defaultCols (máx 12 por fila)
+function saveSizes(col: Record<string,number>, row: number[]) {
+  try { localStorage.setItem(LS_SIZES_KEY, JSON.stringify({ col, row })); } catch {}
+}
+
+function loadSizes(): { col: Record<string,number>; row: number[] } | null {
+  try {
+    const raw = localStorage.getItem(LS_SIZES_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
 function buildRows(ids: string[]): string[][] {
   const rows: string[][] = [];
-  let cur: string[] = [];
-  let cols = 0;
+  let cur: string[] = [], cols = 0;
   for (const id of ids) {
     const mod = Registry.get(id);
     const w = mod?.layout.defaultCols ?? 6;
@@ -30,8 +32,7 @@ function buildRows(ids: string[]): string[][] {
   return rows;
 }
 
-// Cada panel tiene un flex "basis" en porcentaje
-type PanelSizes = Record<string, number>; // id → flex %
+type PanelSizes = Record<string, number>;
 
 export function Dashboard() {
   const store = useModuleStore();
@@ -41,21 +42,21 @@ export function Dashboard() {
 
   const rows = buildRows(store.activeIds);
 
-  // Tamaños: col % por módulo, row % por fila
-  const [colSizes, setColSizes] = useState<PanelSizes>({});
-  const [rowSizes, setRowSizes] = useState<number[]>([]); // % por fila
+  const [colSizes, setColSizes] = useState<PanelSizes>(() => loadSizes()?.col ?? {});
+  const [rowSizes, setRowSizes] = useState<number[]>(() => loadSizes()?.row ?? []);
 
-  // Inicializa tamaños cuando cambian los módulos activos
+  // Init missing sizes for new modules
   useEffect(() => {
+    let changed = false;
     setColSizes(prev => {
       const next = { ...prev };
       for (const row of rows) {
         const share = 100 / row.length;
         for (const id of row) {
-          if (!(id in next)) next[id] = share;
+          if (!(id in next)) { next[id] = share; changed = true; }
         }
       }
-      return next;
+      return changed ? next : prev;
     });
     setRowSizes(prev => {
       if (prev.length === rows.length) return prev;
@@ -64,8 +65,13 @@ export function Dashboard() {
     });
   }, [store.activeIds.join(','), rows.length]);
 
-  // ── Drag horizontal (entre columnas) ────────────────
-  const dragColRef = useRef<{ leftId: string; rightId: string; startX: number; leftPct: number; rightPct: number } | null>(null);
+  // Persist whenever sizes change
+  useEffect(() => {
+    if (Object.keys(colSizes).length > 0) saveSizes(colSizes, rowSizes);
+  }, [colSizes, rowSizes]);
+
+  // ── Col drag ──────────────────────────────────────
+  const dragColRef = useRef<{ leftId:string; rightId:string; startX:number; leftPct:number; rightPct:number }|null>(null);
 
   const onColDividerDown = useCallback((leftId: string, rightId: string, e: React.MouseEvent) => {
     e.preventDefault();
@@ -79,47 +85,40 @@ export function Dashboard() {
 
     const onMove = (mv: MouseEvent) => {
       if (!dragColRef.current) return;
-      const dx  = mv.clientX - dragColRef.current.startX;
-      const dpct = (dx / totalW) * 100;
-      const minPct = 10;
-      const newLeft  = Math.max(minPct, dragColRef.current.leftPct  + dpct);
-      const newRight = Math.max(minPct, dragColRef.current.rightPct - dpct);
-      // renormaliza para que sumen igual
-      setColSizes(prev => ({ ...prev, [dragColRef.current!.leftId]: newLeft, [dragColRef.current!.rightId]: newRight }));
+      const { leftId, rightId, startX, leftPct, rightPct } = dragColRef.current;
+      const dpct = ((mv.clientX - startX) / totalW) * 100;
+      setColSizes(prev => ({
+        ...prev,
+        [leftId]:  Math.max(10, leftPct  + dpct),
+        [rightId]: Math.max(10, rightPct - dpct),
+      }));
     };
     const onUp = () => { dragColRef.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
   }, [colSizes]);
 
-  // ── Drag vertical (entre filas) ──────────────────────
-  const dragRowRef = useRef<{ topIdx: number; botIdx: number; startY: number; topPct: number; botPct: number } | null>(null);
+  // ── Row drag ──────────────────────────────────────
+  const dragRowRef = useRef<{ topIdx:number; botIdx:number; startY:number; topPct:number; botPct:number }|null>(null);
 
   const onRowDividerDown = useCallback((topIdx: number, e: React.MouseEvent) => {
     e.preventDefault();
     const botIdx = topIdx + 1;
     const container = (e.currentTarget as HTMLElement).closest('.dashboard-layout') as HTMLElement;
     const totalH = container?.offsetHeight ?? 1;
-    dragRowRef.current = {
-      topIdx, botIdx, startY: e.clientY,
-      topPct: rowSizes[topIdx] ?? 50,
-      botPct: rowSizes[botIdx] ?? 50,
-    };
+    dragRowRef.current = { topIdx, botIdx, startY: e.clientY, topPct: rowSizes[topIdx]??50, botPct: rowSizes[botIdx]??50 };
+
     const onMove = (mv: MouseEvent) => {
       if (!dragRowRef.current) return;
-      const dy   = mv.clientY - dragRowRef.current.startY;
-      const dpct = (dy / totalH) * 100;
-      const minPct = 8;
-      const newTop = Math.max(minPct, dragRowRef.current.topPct + dpct);
-      const newBot = Math.max(minPct, dragRowRef.current.botPct - dpct);
-      setRowSizes(prev => { const n = [...prev]; n[dragRowRef.current!.topIdx] = newTop; n[dragRowRef.current!.botIdx] = newBot; return n; });
+      const { topIdx, botIdx, startY, topPct, botPct } = dragRowRef.current;
+      const dpct = ((mv.clientY - startY) / totalH) * 100;
+      setRowSizes(prev => { const n=[...prev]; n[topIdx]=Math.max(8,topPct+dpct); n[botIdx]=Math.max(8,botPct-dpct); return n; });
     };
     const onUp = () => { dragRowRef.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
   }, [rowSizes]);
 
-  // ── Estados de carga ──────────────────────────────────
   if (store.activeIds.length === 0) return (
     <div className="dashboard-empty">
       <span className="dashboard-empty-icon">⬡</span>
@@ -127,28 +126,24 @@ export function Dashboard() {
       <small>Hover the left edge to open the sidebar</small>
     </div>
   );
+
   if (loading || !db) return (
     <div className="dashboard-empty">
-      <span className="dashboard-empty-icon" style={{ opacity: 0.3 }}>⬡</span>
-      <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>Initializing…</p>
+      <span className="dashboard-empty-icon" style={{ opacity:0.3 }}>⬡</span>
+      <p style={{ color:'var(--text-muted)', fontSize:'0.875rem' }}>Initializing…</p>
     </div>
   );
 
-  // ── Módulo expandido ──────────────────────────────────
   if (expanded) {
     const mod = Registry.get(expanded);
     if (mod) {
       const C = mod.component;
       return (
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: '0.625rem', minHeight: 0 }}>
-          <div className="module-card" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-            <ModHeader mod={mod} isExpanded
-              onExpand={() => setExpanded(null)}
-              onMinimize={() => { store.minimize(mod.id); setExpanded(null); }}
-              onClose={() => { store.close(mod.id); setExpanded(null); }}
-            />
-            <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-              <C dark={dark} db={db} />
+        <div style={{ flex:1, display:'flex', flexDirection:'column', padding:'0.625rem', minHeight:0 }}>
+          <div className="module-card" style={{ flex:1, display:'flex', flexDirection:'column' }}>
+            <ModuleHeader mod={mod} isExpanded onExpand={()=>setExpanded(null)} onMinimize={()=>{store.minimize(mod.id);setExpanded(null);}} onClose={()=>{store.close(mod.id);setExpanded(null);}}/>
+            <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column', minHeight:0 }}>
+              <C dark={dark} db={db}/>
             </div>
           </div>
         </div>
@@ -160,7 +155,6 @@ export function Dashboard() {
     <div className="dashboard-layout">
       {rows.map((rowIds, ri) => (
         <>
-          {/* ── Fila ── */}
           <div key={`row-${ri}`} className="dashboard-row" style={{ flex: rowSizes[ri] ?? 1 }}>
             {rowIds.map((id, ci) => {
               const mod = Registry.get(id);
@@ -168,45 +162,24 @@ export function Dashboard() {
               const C = mod.component;
               return (
                 <>
-                  {/* Panel */}
-                  <div
-                    key={id}
-                    className="module-card"
-                    style={{ flex: colSizes[id] ?? 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}
-                  >
-                    <ModHeader mod={mod} isExpanded={false}
-                      onExpand={() => setExpanded(id)}
-                      onMinimize={() => store.minimize(id)}
-                      onClose={() => store.close(id)}
-                    />
-                    <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-                      <C dark={dark} db={db} />
+                  <div key={id} className="module-card" style={{ flex: colSizes[id] ?? 1, minWidth:0, display:'flex', flexDirection:'column' }}>
+                    <ModuleHeader mod={mod} isExpanded={false} onExpand={()=>setExpanded(id)} onMinimize={()=>store.minimize(id)} onClose={()=>store.close(id)}/>
+                    <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column', minHeight:0 }}>
+                      <C dark={dark} db={db}/>
                     </div>
                   </div>
-
-                  {/* Divisor vertical entre columnas */}
                   {ci < rowIds.length - 1 && (
-                    <div
-                      key={`cdiv-${id}`}
-                      className="divider divider--col"
-                      onMouseDown={e => onColDividerDown(id, rowIds[ci + 1], e)}
-                    >
-                      <div className="divider-handle" />
+                    <div key={`cdiv-${id}`} className="divider divider--col" onMouseDown={e=>onColDividerDown(id, rowIds[ci+1], e)}>
+                      <div className="divider-handle"/>
                     </div>
                   )}
                 </>
               );
             })}
           </div>
-
-          {/* Divisor horizontal entre filas */}
           {ri < rows.length - 1 && (
-            <div
-              key={`rdiv-${ri}`}
-              className="divider divider--row"
-              onMouseDown={e => onRowDividerDown(ri, e)}
-            >
-              <div className="divider-handle" />
+            <div key={`rdiv-${ri}`} className="divider divider--row" onMouseDown={e=>onRowDividerDown(ri, e)}>
+              <div className="divider-handle"/>
             </div>
           )}
         </>
@@ -215,12 +188,9 @@ export function Dashboard() {
   );
 }
 
-function ModHeader({ mod, isExpanded, onExpand, onMinimize, onClose }: {
+function ModuleHeader({ mod, isExpanded, onExpand, onMinimize, onClose }: {
   mod: NonNullable<ReturnType<typeof Registry.get>>;
-  isExpanded: boolean;
-  onExpand: () => void;
-  onMinimize: () => void;
-  onClose: () => void;
+  isExpanded: boolean; onExpand:()=>void; onMinimize:()=>void; onClose:()=>void;
 }) {
   return (
     <div className="module-header">
@@ -233,25 +203,17 @@ function ModHeader({ mod, isExpanded, onExpand, onMinimize, onClose }: {
       </div>
       <div className="module-header-actions">
         {mod.layout.canExpandFull && (
-          <ModBtn title={isExpanded ? 'Restore' : 'Expand'} onClick={onExpand}>
+          <ModBtn title={isExpanded?'Restore':'Expand'} onClick={onExpand}>
             {isExpanded ? <Minimize2 size={14}/> : <Maximize2 size={14}/>}
           </ModBtn>
         )}
-        {mod.layout.isMinimizable && !isExpanded && (
-          <ModBtn title="Minimize" onClick={onMinimize}><Minus size={14}/></ModBtn>
-        )}
+        {mod.layout.isMinimizable && !isExpanded && <ModBtn title="Minimize" onClick={onMinimize}><Minus size={14}/></ModBtn>}
         <ModBtn title="Close" onClick={onClose} danger><X size={14}/></ModBtn>
       </div>
     </div>
   );
 }
 
-function ModBtn({ children, onClick, title, danger = false }: {
-  children: React.ReactNode; onClick: () => void; title: string; danger?: boolean;
-}) {
-  return (
-    <button className={`module-hbtn${danger ? ' module-hbtn--danger' : ''}`} onClick={onClick} title={title}>
-      {children}
-    </button>
-  );
+function ModBtn({ children, onClick, title, danger=false }: { children:React.ReactNode; onClick:()=>void; title:string; danger?:boolean }) {
+  return <button className={`module-hbtn${danger?' module-hbtn--danger':''}`} onClick={onClick} title={title}>{children}</button>;
 }

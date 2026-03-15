@@ -1,6 +1,6 @@
 // src/modules/chat/index.tsx
 import { useState, useEffect, useRef } from 'react';
-import { Send } from 'lucide-react';
+import { Send, MessageSquare } from 'lucide-react';
 import { ms } from '../../core/styles/tokens';
 import { useSession } from '../../core/auth/authStore';
 import type { AppModule, ModuleProps } from '../../core/types/module';
@@ -94,7 +94,7 @@ const ChatModuleComponent = ({ db }: ModuleProps) => {
 };
 
 export const ChatModule: AppModule = {
-  id: 'mod-chat', name: 'Chat Local', description: 'Mensajería interna', icon: '💬',
+  id: 'mod-chat', name: 'Chat Local', description: 'Mensajería interna', author: 'lelardo', icon: <MessageSquare size={20} />,
   component: ChatModuleComponent,
   layout: { defaultCols: 4, defaultRows: 6, isMinimizable: true, canExpandFull: true },
   migrations: [{

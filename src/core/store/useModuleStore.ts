@@ -9,40 +9,65 @@ interface ModuleEntry {
   taskbarOrder: number;
 }
 
-let _entries: ModuleEntry[] = [];
+const LS_KEY = 'workspace_module_state';
+
+// ── Persistencia ───────────────────────────────────
+function saveState(entries: ModuleEntry[]) {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(entries)); } catch {}
+}
+
+function loadState(): ModuleEntry[] {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+// ── Singleton ──────────────────────────────────────
+let _entries: ModuleEntry[] = loadState();
 const _listeners = new Set<() => void>();
 const emit        = () => _listeners.forEach(fn => fn());
 const subscribe   = (cb: () => void) => { _listeners.add(cb); return () => _listeners.delete(cb); };
 const getSnapshot = () => _entries;
 
+function set(next: ModuleEntry[]) {
+  _entries = next;
+  saveState(next);
+  emit();
+}
+
 export const moduleActions = {
   open(id: string) {
     if (_entries.find(e => e.id === id)) return;
-    _entries = [..._entries, { id, state: 'active', taskbarOrder: _entries.length }];
-    emit();
+    set([..._entries, { id, state: 'active', taskbarOrder: _entries.length }]);
   },
   close(id: string) {
-    _entries = _entries.filter(e => e.id !== id);
-    emit();
+    set(_entries.filter(e => e.id !== id));
   },
   minimize(id: string) {
-    _entries = _entries.map(e => e.id === id ? { ...e, state: 'minimized' } : e);
-    emit();
+    set(_entries.map(e => e.id === id ? { ...e, state: 'minimized' } : e));
   },
   restore(id: string) {
-    _entries = _entries.map(e => e.id === id ? { ...e, state: 'active' } : e);
-    emit();
+    set(_entries.map(e => e.id === id ? { ...e, state: 'active' } : e));
   },
   reorderTaskbar(fromId: string, toId: string) {
-    const mins = _entries.filter(e => e.state === 'minimized').sort((a,b) => a.taskbarOrder - b.taskbarOrder);
+    const mins = _entries
+      .filter(e => e.state === 'minimized')
+      .sort((a, b) => a.taskbarOrder - b.taskbarOrder);
     const fi = mins.findIndex(e => e.id === fromId);
     const ti = mins.findIndex(e => e.id === toId);
     if (fi === -1 || ti === -1) return;
     const arr = [...mins];
     const [m] = arr.splice(fi, 1);
     arr.splice(ti, 0, m);
-    _entries = _entries.map(e => { const i = arr.findIndex(u => u.id === e.id); return i >= 0 ? { ...e, taskbarOrder: i } : e; });
-    emit();
+    set(_entries.map(e => {
+      const i = arr.findIndex(u => u.id === e.id);
+      return i >= 0 ? { ...e, taskbarOrder: i } : e;
+    }));
+  },
+  /** true si hay estado guardado (no abrir defaults) */
+  hasSavedState(): boolean {
+    return loadState().length > 0;
   },
 };
 
@@ -51,7 +76,8 @@ export function useModuleStore() {
   return {
     entries,
     activeIds:    entries.filter(e => e.state === 'active').map(e => e.id),
-    minimizedIds: entries.filter(e => e.state === 'minimized').sort((a,b) => a.taskbarOrder - b.taskbarOrder).map(e => e.id),
+    minimizedIds: entries.filter(e => e.state === 'minimized')
+      .sort((a, b) => a.taskbarOrder - b.taskbarOrder).map(e => e.id),
     ...moduleActions,
   };
 }

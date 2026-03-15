@@ -1,5 +1,5 @@
 // src/core/overlay/types.ts
-import type { ComponentType, RefObject } from 'react';
+import type { ComponentType, RefObject, ReactNode } from 'react';
 import type { DbApi }     from '../db/types';
 import type { User }      from '../auth/types';
 import type { Migration } from '../db/types';
@@ -12,10 +12,8 @@ export interface OverlayProps {
   dark?: boolean;
   fabX:  number;
   fabY:  number;
-  /** Posición del panel relativa al shell (calculada por OverlayLayer) */
   panelX: number;
   panelY: number;
-  /** @deprecated — ya no se usa, el panel va al lado */
   panelClearance: number;
   didDragRef:   RefObject<boolean>;
   onDragStart:  (e: React.MouseEvent) => void;
@@ -25,11 +23,14 @@ export interface OverlayProps {
 
 export interface OverlayWidget {
   id:            string;
+  /** Nombre visible en el sidebar */
+  name:          string;
+  /** Icono visible en el sidebar y el FAB */
+  icon:          ReactNode;
+  author?:       string;
   component:     ComponentType<OverlayProps>;
   defaultCorner: OverlayCorner;
-  /** Ancho del panel en px — el OverlayLayer lo usa para posicionarlo */
   panelWidth?:   number;
-  /** Alto del panel en px */
   panelHeight?:  number;
   migrations?:   Migration[];
 }

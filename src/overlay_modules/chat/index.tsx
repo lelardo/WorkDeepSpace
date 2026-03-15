@@ -129,7 +129,7 @@ function ChatOverlayComponent({ db, user, panelX, panelY, didDragRef, onDragStar
 }
 
 export const ChatOverlay: OverlayWidget = {
-  id:'chat', component: ChatOverlayComponent, defaultCorner:'bottom-right',
+  id:'chat', name:'Chat', author:'lelardo', icon:<MessageSquare size={20} />, component: ChatOverlayComponent, defaultCorner:'bottom-right',
   panelWidth: PANEL_W, panelHeight: PANEL_H,
   migrations: [{
     version: 1,

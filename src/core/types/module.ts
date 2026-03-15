@@ -20,6 +20,7 @@ export interface AppModule {
   id:          string;
   name:        string;
   description: string;
+  author?:     string;
   icon:        ReactNode;
   component:   ComponentType<ModuleProps>;
   layout:      ModuleLayout;

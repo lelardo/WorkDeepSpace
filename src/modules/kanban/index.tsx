@@ -1,6 +1,6 @@
 // src/modules/kanban/index.tsx
 import { useState, useEffect, useCallback } from 'react';
-import { Plus, Trash2, GripVertical } from 'lucide-react';
+import { Plus, Trash2, GripVertical, LayoutGrid } from 'lucide-react';
 import { ms } from '../../core/styles/tokens';
 import type { AppModule, ModuleProps } from '../../core/types/module';
 
@@ -133,7 +133,7 @@ const KanbanComponent = ({ db }: ModuleProps) => {
 };
 
 export const KanbanModule: AppModule = {
-  id: 'kanban', name: 'Kanban', description: 'Task board with drag & drop', icon: '📋',
+  id: 'kanban', name: 'Kanban', description: 'Task board with drag & drop', author: 'lelardo', icon: <LayoutGrid size={20} />,
   component: KanbanComponent,
   layout: { defaultCols: 6, defaultRows: 4, isMinimizable: true, canExpandFull: true },
   migrations: [{

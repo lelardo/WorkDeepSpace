@@ -10,6 +10,7 @@
 //  6. Importa y registra en src/core/registry/index.ts
 // ══════════════════════════════════════════════════════════════
 
+import { Puzzle } from 'lucide-react';
 import { ms } from '../../core/styles/tokens';
 import type { AppModule, ModuleProps } from '../../core/types/module';
 
@@ -41,7 +42,8 @@ export const MyModule: AppModule = {
   id:          'my-module',        // ← único en toda la app
   name:        'My Module',
   description: 'Short description',
-  icon:        '🧩',
+  author:      'lelardo',
+  icon:        <Puzzle size={20} />,
 
   component: MyModuleComponent,
 

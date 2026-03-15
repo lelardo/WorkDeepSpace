@@ -213,7 +213,7 @@ function NotesOverlayComponent({ db, user, panelX, panelY, didDragRef, onDragSta
 }
 
 export const NotesOverlay: OverlayWidget = {
-  id:'notes', component: NotesOverlayComponent, defaultCorner:'bottom-right',
+  id:'notes', name:'Notas', author:'lelardo', icon:<StickyNote size={20} />, component: NotesOverlayComponent, defaultCorner:'bottom-right',
   panelWidth: PANEL_W, panelHeight: PANEL_H,
   migrations: [{
     version: 1,

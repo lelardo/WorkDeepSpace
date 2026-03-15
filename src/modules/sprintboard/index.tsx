@@ -8,7 +8,7 @@
 //   • El Backlog es el pool de donde se jala al sprint actual
 
 import { useState, useEffect, useCallback } from 'react';
-import { Plus, Trash2, ChevronRight, Flame, Target, Zap } from 'lucide-react';
+import { Plus, Trash2, ChevronRight, Flame, Target, Zap, Rocket } from 'lucide-react';
 import { ms } from '../../core/styles/tokens';
 import type { AppModule, ModuleProps } from '../../core/types/module';
 
@@ -307,7 +307,8 @@ export const SprintModule: AppModule = {
   id:          'mod-sprint',
   name:        'Sprint Board',
   description: 'Backlog · Sprint · Burndown',
-  icon:        '⚡',
+  author:      'lelardo',
+  icon:        <Rocket size={20} />,
   component:   SprintComponent,
   layout: {
     defaultCols:   6,

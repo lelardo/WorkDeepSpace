@@ -4,7 +4,6 @@ import { initDb } from '../db/migrations';
 import { AUTH_MIGRATIONS } from '../auth/migrations';
 import { initOverlays } from '../overlay/overlayRegistry';
 
-import { DemoModule }   from '../../modules/demo';
 import { KanbanModule } from '../../modules/kanban';
 import { ChatModule }   from '../../modules/chat';
 import { BacklogModule }   from '../../modules/backlog';
@@ -13,7 +12,6 @@ import { RoadmapModule }   from '../../modules/roadmap';
 
 
 const MODULES: AppModule[] = [
-  DemoModule,
   KanbanModule,
   ChatModule,
   BacklogModule,

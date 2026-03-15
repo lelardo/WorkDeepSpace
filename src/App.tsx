@@ -8,16 +8,15 @@ import { Dashboard }     from './core/components/Dashboard';
 import { OverlayLayer }  from './core/overlay/OverlayLayer';
 import { moduleActions } from './core/store/useModuleStore';
 
-let _opened = false;
-function openDefaults() {
-  if (_opened) return;
-  _opened = true;
-  moduleActions.open('kanban');
-  moduleActions.open('demo');
-}
-
 function App() {
-  useEffect(() => { openDefaults(); }, []);
+  useEffect(() => {
+    // Solo abre defaults si el usuario nunca tuvo módulos guardados
+    if (!moduleActions.hasSavedState()) {
+      moduleActions.open('kanban');
+      moduleActions.open('demo');
+    }
+  }, []);
+
   return (
     <AuthGate>
       <div className="app-root">
@@ -27,7 +26,6 @@ function App() {
           <Dashboard />
         </div>
       </div>
-      {/* Overlays se renderizan en un portal sobre toda la UI */}
       <OverlayLayer />
     </AuthGate>
   );
