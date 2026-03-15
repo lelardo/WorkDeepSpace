@@ -1,4 +1,4 @@
-# Component Guide — Modular Workspace
+# Component Guide — WORK**DEEP**SPACE
 
 There are two types of components you can create:
 
