@@ -9,6 +9,7 @@ import { useDb } from '../db/useDb';
 import { restoreSession } from '../auth/authService';
 import { LoginView }    from './LoginView';
 import { RegisterView } from './RegisterView';
+import { SplashScreen } from './SplashScreen';
 
 type AuthView = 'login' | 'register';
 
@@ -21,24 +22,15 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   // Intenta restaurar sesión guardada una vez que la BD esté lista
   useEffect(() => {
     if (!loading && db && !restored) {
-      restoreSession(db);
-      setRestored(true);
+      (async () => {
+        await restoreSession(db);
+        setRestored(true);
+      })();
     }
   }, [db, loading, restored]);
 
   if (loading || !restored || !db) {
-    return (
-      <div style={{
-        height: '100vh', width: '100vw',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        backgroundColor: 'var(--bg)', color: 'var(--text-faint)',
-        fontFamily: 'var(--sans)', fontSize: '0.875rem', gap: '0.75rem',
-        flexDirection: 'column',
-      }}>
-        <span style={{ fontSize: '2rem', opacity: 0.25 }}>⬡</span>
-        <span>Iniciando…</span>
-      </div>
-    );
+    return <SplashScreen />;
   }
 
   if (!session) {

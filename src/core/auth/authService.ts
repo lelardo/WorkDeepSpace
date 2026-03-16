@@ -49,14 +49,21 @@ export async function register(
     [username, displayName, hash]
   );
 
+  // Obtener el usuario creado con su ID real
+  const newUser = await db.get<{ id: number; created_at: string }>(
+    'SELECT id, created_at FROM users WHERE username = $1',
+    [username]
+  );
+  if (!newUser) return { ok: false, error: 'Error creando usuario.' };
+
   const user: User = {
-    id: 0, // Will be set from the database on restore
+    id: newUser.id,
     username,
     display_name: displayName,
-    created_at: new Date().toISOString(),
+    created_at: newUser.created_at,
   };
   const token = generateToken();
-  await db.run('INSERT INTO sessions (token, user_id, created_at) VALUES ($1, (SELECT id FROM users WHERE username = $2), CURRENT_TIMESTAMP)', [token, username]);
+  await db.run('INSERT INTO sessions (token, user_id, created_at) VALUES ($1, $2, CURRENT_TIMESTAMP)', [token, newUser.id]);
   sessionActions.login(user, token);
   return { ok: true, user };
 }

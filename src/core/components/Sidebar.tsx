@@ -1,10 +1,11 @@
 // src/core/components/Sidebar.tsx
-import { Sun, Moon, LogOut } from 'lucide-react';
+import { Sun, Moon, LogOut, LayoutGrid, AppWindow } from 'lucide-react';
 import { useTheme }       from '../context/ThemeContext';
 import { useModuleStore } from '../store/useModuleStore';
 import { Registry }       from '../registry/index';
 import { useSession, sessionActions } from '../auth/authStore';
 import { useOverlayStore } from '../overlay/overlayStore';
+import { useLayoutStore } from '../store/useLayoutStore';
 import { OverlayRegistry } from '../overlay/overlayRegistry';
 
 export function Sidebar() {
@@ -13,6 +14,7 @@ export function Sidebar() {
   const session  = useSession();
   const oStore   = useOverlayStore();
   const overlays = OverlayRegistry.all();
+  const layout   = useLayoutStore();
 
   const isOpen = (id: string) => store.entries.some(e => e.id === id);
   const isMini = (id: string) => store.entries.some(e => e.id === id && e.state === 'minimized');
@@ -110,6 +112,10 @@ export function Sidebar() {
 
         {/* Footer */}
         <div className="sidebar-footer" style={{ display:'flex', flexDirection:'column', gap:'0.375rem' }}>
+          <button className="sidebar-theme-btn" onClick={() => layout.toggleMode()}>
+            {layout.mode === 'canvas' ? <LayoutGrid size={14}/> : <AppWindow size={14}/>}
+            <span>{layout.mode === 'canvas' ? 'Modo Grid' : 'Modo Canvas'}</span>
+          </button>
           <button className="sidebar-theme-btn" onClick={toggle}>
             {dark ? <Sun size={14}/> : <Moon size={14}/>}
             <span>{dark ? 'Light mode' : 'Dark mode'}</span>

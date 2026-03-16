@@ -5,28 +5,41 @@ import { useModuleStore, moduleActions } from '../store/useModuleStore';
 import { useTheme } from '../context/ThemeContext';
 import { Registry } from '../registry/index';
 import { useDb } from '../db/useDb';
+import { useLayoutStore } from '../store/useLayoutStore';
+import { CanvasDashboard } from './CanvasDashboard';
 
 const LS_SIZES_KEY = 'workspace_panel_sizes';
 
-function saveSizes(col: Record<string,number>, row: number[]) {
-  try { localStorage.setItem(LS_SIZES_KEY, JSON.stringify({ col, row })); } catch {}
+function saveSizes(col: Record<string,number>, row: number[], rowStructureKey: string) {
+  try { localStorage.setItem(LS_SIZES_KEY, JSON.stringify({ col, row, rowStructureKey })); } catch {}
 }
 
-function loadSizes(): { col: Record<string,number>; row: number[] } | null {
+function loadSizes(): { col: Record<string,number>; row: number[]; rowStructureKey?: string } | null {
   try {
     const raw = localStorage.getItem(LS_SIZES_KEY);
     return raw ? JSON.parse(raw) : null;
   } catch { return null; }
 }
 
-function buildRows(ids: string[]): string[][] {
+function buildRows(ids: string[], rowBreaks: Set<string>): string[][] {
   const rows: string[][] = [];
-  let cur: string[] = [], cols = 0;
+  let cur: string[] = [];
   for (const id of ids) {
     const mod = Registry.get(id);
-    const w = mod?.layout.defaultCols ?? 6;
-    if (cols + w > 12 && cur.length > 0) { rows.push(cur); cur = []; cols = 0; }
-    cur.push(id); cols += w;
+    const w   = mod?.layout.defaultCols ?? 6;
+    const curCols = cur.reduce((s, cid) => {
+      const m = Registry.get(cid); return s + (m?.layout.defaultCols ?? 6);
+    }, 0);
+
+    // Only start a new row if there's an EXPLICIT break OR natural overflow (strictly > 12)
+    // Note: curCols + w === 12 means they fit perfectly — do NOT start new row
+    const naturalOverflow = cur.length > 0 && curCols + w > 12;
+    const explicitBreak   = cur.length > 0 && rowBreaks.has(id);
+
+    if (naturalOverflow || explicitBreak) {
+      rows.push(cur); cur = [];
+    }
+    cur.push(id);
   }
   if (cur.length) rows.push(cur);
   return rows;
@@ -40,36 +53,64 @@ export function Dashboard() {
   const { db, loading } = useDb();
   const [expanded,    setExpanded]    = useState<string | null>(null);
   const [dragModule,  setDragModule]  = useState<string | null>(null);
-  const [dragOverId,  setDragOverId]  = useState<string | null>(null);
+  const [dropTarget,  setDropTarget]  = useState<{ id: string; zone: 'left'|'center'|'right'|'top'|'bottom' } | null>(null);
 
-  const rows = buildRows(store.activeIds);
+  const layout = useLayoutStore();
 
-  const [colSizes, setColSizes] = useState<PanelSizes>(() => loadSizes()?.col ?? {});
-  const [rowSizes, setRowSizes] = useState<number[]>(() => loadSizes()?.row ?? []);
-
-  // Init missing sizes for new modules
+  // Clean stale rowBreaks on mount — removes breaks for modules that
+  // no longer exist or whose breaks create phantom rows
   useEffect(() => {
-    let changed = false;
-    setColSizes(prev => {
-      const next = { ...prev };
-      for (const row of rows) {
-        const share = 100 / row.length;
-        for (const id of row) {
-          if (!(id in next)) { next[id] = share; changed = true; }
-        }
-      }
-      return changed ? next : prev;
-    });
-    setRowSizes(prev => {
-      if (prev.length === rows.length) return prev;
-      const share = 100 / (rows.length || 1);
-      return rows.map((_, i) => prev[i] ?? share);
-    });
-  }, [store.activeIds.join(','), rows.length]);
+    moduleActions.cleanRowBreaks(store.activeIds);
+  }, []);
 
-  // Persist whenever sizes change
+  const rows = buildRows(store.activeIds, store.rowBreaks);
+
+  // Compute the current row structure key — used to detect stale saved sizes
+  const rowStructureKey = rows.map(r => r.join(':')).join('|');
+
+  const [colSizes, setColSizes] = useState<PanelSizes>(() => {
+    const saved = loadSizes();
+    if (!saved) return {};
+    // Restore if saved structure matches current rows
+    const savedKey = saved.rowStructureKey;
+    const curKey   = rows.map(r => r.join(':')).join('|');
+    if (savedKey === curKey) return saved.col ?? {};
+    // Structure changed — start fresh
+    const col: PanelSizes = {};
+    for (const row of rows) { const s = 100 / row.length; for (const id of row) col[id] = s; }
+    return col;
+  });
+  const [rowSizes, setRowSizes] = useState<number[]>(() => {
+    const saved = loadSizes();
+    if (!saved) { const s = 100 / (rows.length || 1); return rows.map(() => s); }
+    const savedKey = saved.rowStructureKey;
+    const curKey   = rows.map(r => r.join(':')).join('|');
+    if (savedKey === curKey && saved.row?.length === rows.length) return saved.row;
+    const s = 100 / (rows.length || 1);
+    return rows.map(() => s);
+  });
+
+  // Recalculate only when row structure actually changes (not on first mount)
+  const prevStructureKey = useRef<string | null>(null);
   useEffect(() => {
-    if (Object.keys(colSizes).length > 0) saveSizes(colSizes, rowSizes);
+    if (prevStructureKey.current === null) {
+      // First mount — skip, useState already handled it
+      prevStructureKey.current = rowStructureKey;
+      return;
+    }
+    if (prevStructureKey.current === rowStructureKey) return;
+    prevStructureKey.current = rowStructureKey;
+    // Structure changed — reset to equal distribution
+    const share = 100 / (rows.length || 1);
+    setRowSizes(rows.map(() => share));
+    const newCol: PanelSizes = {};
+    for (const row of rows) { const s = 100 / row.length; for (const id of row) newCol[id] = s; }
+    setColSizes(newCol);
+  }, [rowStructureKey]);
+
+  // Persist whenever sizes change — save structure key alongside
+  useEffect(() => {
+    if (Object.keys(colSizes).length > 0) saveSizes(colSizes, rowSizes, rowStructureKey);
   }, [colSizes, rowSizes]);
 
   // ── Col drag ──────────────────────────────────────
@@ -121,6 +162,9 @@ export function Dashboard() {
     window.addEventListener('mouseup', onUp);
   }, [rowSizes]);
 
+  // ── Mode switch — after all hooks ───────────────
+  if (layout.mode === 'canvas') return <CanvasDashboard />;
+
   if (store.activeIds.length === 0) return (
     <div className="dashboard-empty">
       <span className="dashboard-empty-icon">⬡</span>
@@ -153,40 +197,90 @@ export function Dashboard() {
     }
   }
 
+  // ── Smart drop handler ────────────────────────
+  // Zone comes from dropTarget (set during dragOver) — that's what the
+  // user saw as feedback, so we use it as the source of truth on drop.
+  const handleDrop = (e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    if (!dragModule || dragModule === targetId) { setDragModule(null); setDropTarget(null); return; }
+    const zone = dropTarget?.id === targetId ? dropTarget.zone : 'center';
+    if (zone === 'center') {
+      moduleActions.reorderModules(dragModule, targetId);
+    } else if (zone === 'left' || zone === 'right') {
+      moduleActions.insertModule(dragModule, targetId, zone);
+    } else {
+      // top / bottom → split into own row
+      moduleActions.splitModule(dragModule, targetId, zone === 'top' ? 'above' : 'below');
+    }
+    setDragModule(null);
+    setDropTarget(null);
+  };
+
+  const handleDragOver = (e: React.DragEvent, id: string) => {
+    e.preventDefault();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const xPct = (e.clientX - rect.left) / rect.width;
+    const yPct = (e.clientY - rect.top)  / rect.height;
+    // Top/bottom 20% → split into own row; left/right 25% → insert same row; center → swap
+    let zone: 'left'|'center'|'right'|'top'|'bottom';
+    if (yPct < 0.20)      zone = 'top';
+    else if (yPct > 0.80) zone = 'bottom';
+    else if (xPct < 0.25) zone = 'left';
+    else if (xPct > 0.75) zone = 'right';
+    else                  zone = 'center';
+    setDropTarget(prev => prev?.id === id && prev?.zone === zone ? prev : { id, zone });
+  };
+
   return (
     <div className="dashboard-layout">
       {rows.map((rowIds, ri) => (
         <React.Fragment key={ri}>
           <div
             className="dashboard-row"
-            style={{ flex: rowSizes[ri] ?? 1 }}
+            style={{ flex: `${rowSizes[ri] ?? 1} 1 0%` }}
           >
             {rowIds.map((id, ci) => {
               const mod  = Registry.get(id);
               if (!mod) return null;
               const C    = mod.component;
-              const isOver = dragOverId === id && dragModule !== id;
+              const dt   = dropTarget?.id === id && dragModule !== id ? dropTarget : null;
               return (
                 <React.Fragment key={id}>
                   <div
                     className="module-card"
                     style={{
-                      flex: colSizes[id] ?? 1, minWidth:0,
+                      flex: `${colSizes[id] ?? 1} 1 0%`, minWidth:0,
                       display:'flex', flexDirection:'column',
-                      outline: isOver ? '2px solid var(--primary)' : 'none',
-                      transition: 'outline 0.1s',
+                      position: 'relative',
                     }}
-                    onDragOver={e => { e.preventDefault(); setDragOverId(id); }}
-                    onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverId(null); }}
-                    onDrop={e => {
-                      e.preventDefault();
-                      if (dragModule && dragModule !== id) {
-                        moduleActions.reorderModules(dragModule, id);
-                      }
-                      setDragModule(null);
-                      setDragOverId(null);
-                    }}
+                    onDragOver={e => handleDragOver(e, id)}
+                    onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropTarget(null); }}
+                    onDrop={e => handleDrop(e, id)}
                   >
+                    {/* Drop indicator — vertical line for left/right */}
+                    {dt && (dt.zone === 'left' || dt.zone === 'right') && (
+                      <div style={{
+                        position:'absolute', top:0, bottom:0, width:'3px',
+                        backgroundColor:'var(--primary)', zIndex:20, borderRadius:'2px',
+                        left: dt.zone === 'left' ? 0 : undefined,
+                        right: dt.zone === 'right' ? 0 : undefined,
+                        boxShadow: '0 0 8px var(--primary)', pointerEvents:'none',
+                      }}/>
+                    )}
+                    {/* Drop indicator — horizontal line for top/bottom */}
+                    {dt && (dt.zone === 'top' || dt.zone === 'bottom') && (
+                      <div style={{
+                        position:'absolute', left:0, right:0, height:'3px',
+                        backgroundColor:'var(--primary)', zIndex:20, borderRadius:'2px',
+                        top: dt.zone === 'top' ? 0 : undefined,
+                        bottom: dt.zone === 'bottom' ? 0 : undefined,
+                        boxShadow: '0 0 8px var(--primary)', pointerEvents:'none',
+                      }}/>
+                    )}
+                    {/* Center drop highlight */}
+                    {dt && dt.zone === 'center' && (
+                      <div style={{ position:'absolute', inset:0, border:'2px solid var(--primary)', borderRadius:'var(--radius-lg)', zIndex:20, pointerEvents:'none' }}/>
+                    )}
                     <ModuleHeader
                       mod={mod} isExpanded={false}
                       onExpand={()=>setExpanded(id)}
@@ -194,7 +288,7 @@ export function Dashboard() {
                       onClose={()=>store.close(id)}
                       draggable
                       onDragStart={()=>setDragModule(id)}
-                      onDragEnd={()=>{ setDragModule(null); setDragOverId(null); }}
+                      onDragEnd={()=>{ setDragModule(null); setDropTarget(null); }}
                     />
                     <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column', minHeight:0,
                       opacity: dragModule === id ? 0.4 : 1, transition: 'opacity 0.15s' }}>

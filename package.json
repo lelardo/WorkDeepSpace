@@ -23,7 +23,9 @@
     "lucide-react": "^0.577.0",
     "pg": "^8.20.0",
     "react": "^19.2.4",
-    "react-dom": "^19.2.4"
+    "react-dom": "^19.2.4",
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
@@ -58,6 +60,7 @@
       "electron/**/*",
       "server.js",
       "public/**/*",
+      ".env.local",
       ".env.default",
       "node_modules/**/*"
     ],
