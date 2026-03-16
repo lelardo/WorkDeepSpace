@@ -23,7 +23,7 @@ export function LoginView({ db, onSwitch }: { db: DbApi; onSwitch: () => void })
 
         {/* Header */}
         <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-          <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>⬡</div>
+          <img src="/icon.png" alt="WorkDeepSpace" style={{ width: '3rem', height: '3rem', marginBottom: '0.5rem' }} />
           <h1 style={{ margin: 0, fontFamily: 'var(--sans)', fontSize: '1.25rem', fontWeight: 700, color: 'var(--text)' }}>
             WorkDeepSpace
           </h1>

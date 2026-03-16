@@ -30,10 +30,9 @@ export function Sidebar() {
 
         {/* Header */}
         <div className="sidebar-header">
-          <span className="sidebar-logo">⬡</span>
+          <img src="/icon.png" alt="logo" style={{ width: '2rem', height: '2rem', borderRadius: '0.25rem' }} />
           <div>
             <div className="sidebar-title">WorkDeepSpace</div>
-            <div className="sidebar-version">v0.1.0</div>
           </div>
         </div>
 

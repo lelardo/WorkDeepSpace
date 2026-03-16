@@ -9,7 +9,7 @@
     "dev": "vite",
     "dev:local": "vite",
     "dev:remote": "concurrently \"node server.js\" \"vite\"",
-    "electron-dev": "cross-env NODE_ENV=development concurrently \"npm run dev:remote\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron-dev": "cross-env NODE_ENV=development concurrently \"npm run dev:remote\" \"npx wait-on http://localhost:5173 && npx electron .\"",
     "electron-build": "npm run build && electron-builder",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
@@ -35,7 +35,6 @@
     "cross-env": "^10.1.0",
     "electron": "^41.0.2",
     "electron-builder": "^26.8.1",
-    "electron-is-dev": "^3.0.1",
     "eslint": "^9.39.4",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.2",
@@ -51,7 +50,8 @@
     "appId": "com.workdeepspace.app",
     "productName": "WorkDeepSpace",
     "directories": {
-      "buildResources": "public"
+      "buildResources": "public",
+      "output": "release"
     },
     "files": [
       "dist/**/*",
@@ -62,6 +62,7 @@
       "node_modules/**/*"
     ],
     "win": {
+      "icon": "win/icon.ico",
       "target": [
         {
           "target": "nsis",
@@ -81,7 +82,9 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "installerIcon": "win/icon.ico",
+      "uninstallerIcon": "win/icon.ico"
     }
   }
 }

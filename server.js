@@ -145,7 +145,7 @@ app.post('/api/migrations/run', async (req, res) => {
 app.use(express.static(join(__dirname, 'dist')));
 
 // SPA fallback - sirve index.html para rutas desconocidas
-app.get('*', (req, res) => {
+app.use((req, res) => {
   res.sendFile(join(__dirname, 'dist', 'index.html'));
 });
 

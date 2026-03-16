@@ -29,12 +29,12 @@ export function RegisterView({ db, onSwitch }: { db: DbApi; onSwitch: () => void
 
         {/* Header */}
         <div style={{ textAlign: 'center', marginBottom: '1.75rem' }}>
-          <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>⬡</div>
+          <img src="/icon.png" alt="WorkDeepSpace" style={{ width: '3rem', height: '3rem', marginBottom: '0.5rem' }} />
           <h1 style={{ margin: 0, fontFamily: 'var(--sans)', fontSize: '1.25rem', fontWeight: 700, color: 'var(--text)' }}>
             Crear cuenta
           </h1>
           <p style={{ margin: '0.25rem 0 0', fontFamily: 'var(--sans)', fontSize: '0.8rem', color: 'var(--text-faint)' }}>
-            WorkDeepSpace v0.1.0
+            Regístrate en WorkDeepSpace
           </p>
         </div>
 

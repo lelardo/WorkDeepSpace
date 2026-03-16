@@ -6,9 +6,13 @@ dist/
 dist-ssr/
 out/
 
-# Electron (optional, local build only)
+# Electron (local dev & builds — NEVER commit)
 electron/
 release/
+public/win/
+*.exe
+*.nsis
+*.blockmap
 
 # Vite cache
 .vite/
