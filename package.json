@@ -3,7 +3,7 @@
   "description": "workdeepspace",
   "author": "lelardo",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.5",
   "type": "module",
   "scripts": {
     "dev": "vite",

@@ -1,3 +1,6 @@
+<div align="center">
+  <img src="./public/icon.png" width="120" alt="WorkDeepSpace Logo">
+</div>
 # WORK**DEEP**SPACE
 
 **WorkDeepSpace** is a modular, browser-based productivity command deck designed for deep work and high-performance engineering. It allows developers to build a personalized workspace by assembling functional "blocks" (modules) onto a synchronized grid, simulating a mission control center for software development.

@@ -167,7 +167,19 @@ export function Dashboard() {
 
   if (store.activeIds.length === 0) return (
     <div className="dashboard-empty">
-      <span className="dashboard-empty-icon">⬡</span>
+      <div style={{ position: 'relative', width: '2.5rem', height: '2.5rem' }}>
+        <img 
+          src="/icon.png" 
+          alt="logo" 
+          style={{ 
+            width: '100%', 
+            height: '100%', 
+            borderRadius: '0.375rem',
+            filter: 'brightness(0.9) drop-shadow(0 4px 12px rgba(0,0,0,0.15))',
+            opacity: 0.85
+          }} 
+        />
+      </div>
       <p>No active modules</p>
       <small>Hover the left edge to open the sidebar</small>
     </div>
