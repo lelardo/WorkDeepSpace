@@ -7,6 +7,7 @@ interface ModuleEntry {
   id:           string;
   state:        ModuleState;
   taskbarOrder: number;
+  position?:    { row: number; col: number }; // grid position (optional)
 }
 
 const LS_KEY = 'workspace_module_state';
@@ -64,6 +65,40 @@ export const moduleActions = {
       const i = arr.findIndex(u => u.id === e.id);
       return i >= 0 ? { ...e, taskbarOrder: i } : e;
     }));
+  },
+  /** Intercambia dos módulos activos de posición */
+  reorderModules(fromId: string, toId: string) {
+    const next = [..._entries];
+    const fi   = next.findIndex(e => e.id === fromId);
+    const ti   = next.findIndex(e => e.id === toId);
+    if (fi === -1 || ti === -1) return;
+    [next[fi], next[ti]] = [next[ti], next[fi]];
+    set(next);
+  },
+  /** Mueve un módulo a una posición específica en la grid */
+  setModulePosition(id: string, row: number, col: number) {
+    set(_entries.map(e => 
+      e.id === id ? { ...e, position: { row, col } } : e
+    ));
+  },
+  /** Intercambia las posiciones de dos módulos en la grid */
+  swapModulePositions(idA: string, idB: string) {
+    const entryA = _entries.find(e => e.id === idA);
+    const entryB = _entries.find(e => e.id === idB);
+    if (!entryA || !entryB) return;
+    
+    const posA = entryA.position;
+    const posB = entryB.position;
+    
+    set(_entries.map(e => {
+      if (e.id === idA) return { ...e, position: posB };
+      if (e.id === idB) return { ...e, position: posA };
+      return e;
+    }));
+  },
+  /** Obtiene la posición de un módulo */
+  getModulePosition(id: string) {
+    return _entries.find(e => e.id === id)?.position ?? null;
   },
   /** true si hay estado guardado (no abrir defaults) */
   hasSavedState(): boolean {

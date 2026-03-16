@@ -1,7 +1,7 @@
 // src/core/components/Dashboard.tsx
-import { useRef, useState, useCallback, useEffect } from 'react';
+import React, { useRef, useState, useCallback, useEffect } from 'react';
 import { X, Minus, Maximize2, Minimize2 } from 'lucide-react';
-import { useModuleStore } from '../store/useModuleStore';
+import { useModuleStore, moduleActions } from '../store/useModuleStore';
 import { useTheme } from '../context/ThemeContext';
 import { Registry } from '../registry/index';
 import { useDb } from '../db/useDb';
@@ -38,7 +38,9 @@ export function Dashboard() {
   const store = useModuleStore();
   const { dark } = useTheme();
   const { db, loading } = useDb();
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const [expanded,    setExpanded]    = useState<string | null>(null);
+  const [dragModule,  setDragModule]  = useState<string | null>(null);
+  const [dragOverId,  setDragOverId]  = useState<string | null>(null);
 
   const rows = buildRows(store.activeIds);
 
@@ -154,46 +156,84 @@ export function Dashboard() {
   return (
     <div className="dashboard-layout">
       {rows.map((rowIds, ri) => (
-        <div key={`row-container-${ri}`} style={{ flex: rowSizes[ri] ?? 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-          <div className="dashboard-row" style={{ flex: 1, display: 'flex', gap: 'inherit' }}>
+        <React.Fragment key={ri}>
+          <div
+            className="dashboard-row"
+            style={{ flex: rowSizes[ri] ?? 1 }}
+          >
             {rowIds.map((id, ci) => {
-              const mod = Registry.get(id);
+              const mod  = Registry.get(id);
               if (!mod) return null;
-              const C = mod.component;
+              const C    = mod.component;
+              const isOver = dragOverId === id && dragModule !== id;
               return (
-                <>
-                  <div key={id} className="module-card" style={{ flex: colSizes[id] ?? 1, minWidth:0, display:'flex', flexDirection:'column' }}>
-                    <ModuleHeader mod={mod} isExpanded={false} onExpand={()=>setExpanded(id)} onMinimize={()=>store.minimize(id)} onClose={()=>store.close(id)}/>
-                    <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column', minHeight:0 }}>
+                <React.Fragment key={id}>
+                  <div
+                    className="module-card"
+                    style={{
+                      flex: colSizes[id] ?? 1, minWidth:0,
+                      display:'flex', flexDirection:'column',
+                      outline: isOver ? '2px solid var(--primary)' : 'none',
+                      transition: 'outline 0.1s',
+                    }}
+                    onDragOver={e => { e.preventDefault(); setDragOverId(id); }}
+                    onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverId(null); }}
+                    onDrop={e => {
+                      e.preventDefault();
+                      if (dragModule && dragModule !== id) {
+                        moduleActions.reorderModules(dragModule, id);
+                      }
+                      setDragModule(null);
+                      setDragOverId(null);
+                    }}
+                  >
+                    <ModuleHeader
+                      mod={mod} isExpanded={false}
+                      onExpand={()=>setExpanded(id)}
+                      onMinimize={()=>store.minimize(id)}
+                      onClose={()=>store.close(id)}
+                      draggable
+                      onDragStart={()=>setDragModule(id)}
+                      onDragEnd={()=>{ setDragModule(null); setDragOverId(null); }}
+                    />
+                    <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column', minHeight:0,
+                      opacity: dragModule === id ? 0.4 : 1, transition: 'opacity 0.15s' }}>
                       <C dark={dark} db={db}/>
                     </div>
                   </div>
                   {ci < rowIds.length - 1 && (
-                    <div key={`cdiv-${id}`} className="divider divider--col" onMouseDown={e=>onColDividerDown(id, rowIds[ci+1], e)}>
+                    <div className="divider divider--col" onMouseDown={e=>onColDividerDown(id, rowIds[ci+1], e)}>
                       <div className="divider-handle"/>
                     </div>
                   )}
-                </>
+                </React.Fragment>
               );
             })}
           </div>
           {ri < rows.length - 1 && (
-            <div key={`rdiv-${ri}`} className="divider divider--row" onMouseDown={e=>onRowDividerDown(ri, e)}>
+            <div className="divider divider--row" onMouseDown={e=>onRowDividerDown(ri, e)}>
               <div className="divider-handle"/>
             </div>
           )}
-        </div>
+        </React.Fragment>
       ))}
     </div>
   );
 }
 
-function ModuleHeader({ mod, isExpanded, onExpand, onMinimize, onClose }: {
+function ModuleHeader({ mod, isExpanded, onExpand, onMinimize, onClose, draggable, onDragStart, onDragEnd }: {
   mod: NonNullable<ReturnType<typeof Registry.get>>;
   isExpanded: boolean; onExpand:()=>void; onMinimize:()=>void; onClose:()=>void;
+  draggable?: boolean; onDragStart?:()=>void; onDragEnd?:()=>void;
 }) {
   return (
-    <div className="module-header">
+    <div
+      className="module-header"
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      style={{ cursor: draggable ? 'grab' : undefined }}
+    >
       <div className="module-header-left">
         <span className="module-header-icon">{mod.icon}</span>
         <div>
