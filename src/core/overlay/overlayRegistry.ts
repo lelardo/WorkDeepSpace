@@ -9,12 +9,12 @@ import type { OverlayWidget } from './types';
 import { initDb } from '../db/migrations';
 
 // ── Importa tus overlays aquí ─────────────────────────
-import { ChatOverlay } from '../../overlay_modules/chat';
+//import { ChatOverlay } from '../../overlay_modules/chat';
 import { NotesOverlay } from '../../overlay_modules/notes';
 // import { NotificationsOverlay } from '../../overlays/notifications';
 
 const OVERLAYS: OverlayWidget[] = [
-  ChatOverlay,
+  //ChatOverlay,
   NotesOverlay,
   // NotificationsOverlay,
 ];

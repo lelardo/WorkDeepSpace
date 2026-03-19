@@ -5,7 +5,7 @@ import { AUTH_MIGRATIONS } from '../auth/migrations';
 import { initOverlays } from '../overlay/overlayRegistry';
 
 import { KanbanModule } from '../../modules/kanban';
-import { ChatModule }   from '../../modules/chat';
+//import { ChatModule }   from '../../modules/chat';
 import { BacklogModule }   from '../../modules/backlog';
 import { SprintModule }   from '../../modules/sprintboard';
 import { RoadmapModule }   from '../../modules/roadmap';
@@ -13,7 +13,7 @@ import { RoadmapModule }   from '../../modules/roadmap';
 
 const MODULES: AppModule[] = [
   KanbanModule,
-  ChatModule,
+  //ChatModule,
   BacklogModule,
   SprintModule,
   RoadmapModule,
